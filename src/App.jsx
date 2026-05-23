@@ -1883,10 +1883,7 @@ export default function App() {
     try { return !!localStorage.getItem("sai_session"); } catch { return false; }
   });
   if (!loggedIn) return <SurveyAILogin onSuccess={() => setLoggedIn(true)} />;
-  const [loggedIn, setLoggedIn] = useState(() => {
-    try { return !!localStorage.getItem("sai_session"); } catch { return false; }
-  });
-  if (!loggedIn) return <AppLogin onSuccess={() => setLoggedIn(true)}/>;
+
   const [page,setPage]=useState("dashboard");
   const [col,setCol]=useState(false);
   const [theme,setTheme]=useState(THEMES.dark);
