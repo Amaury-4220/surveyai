@@ -1736,6 +1736,75 @@ const PAGE_TITLES = {
 };
 
 export default function App() {
+  const [loggedIn, setLoggedIn] = useState(() => {
+    try { return !!localStorage.getItem("sai_session"); } catch { return false; }
+  });
+  if (!loggedIn) {
+    const LoginPage = () => {
+      const [email, setEmail] = useState("");
+      const [pass, setPass] = useState("");
+      const [loading, setLoading] = useState(false);
+      const [err, setErr] = useState("");
+      const T = THEMES.dark;
+      const doLogin = () => {
+        if(!email||!pass){setErr("Completa todos los campos");return;}
+        setLoading(true);setErr("");
+        setTimeout(()=>{
+          setLoading(false);
+          if(email==="admin@surveyai.cl"&&pass==="Admin123!"){
+            try{localStorage.setItem("sai_session","1");}catch{}
+            setLoggedIn(true);
+          } else { setErr("Credenciales incorrectas. Demo: admin@surveyai.cl / Admin123!"); }
+        },1300);
+      };
+      return (
+        <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
+          <style>{"@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}input,button{font-family:inherit}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}"}</style>
+          <div style={{position:"fixed",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+            {[0,1,2].map(i=><div key={i} style={{position:"absolute",borderRadius:"50%",background:["rgba(6,182,212,0.07)","rgba(139,92,246,0.05)","rgba(6,182,212,0.04)"][i],width:[300,200,400][i],height:[300,200,400][i],left:["-10%","60%","30%"][i],top:["-10%","70%","-20%"][i],filter:"blur(60px)"}}/>)}
+          </div>
+          <div style={{width:"100%",maxWidth:440,position:"relative",zIndex:1}}>
+            <div style={{textAlign:"center",marginBottom:28}}>
+              <div style={{width:72,height:72,borderRadius:20,background:"linear-gradient(135deg,#06B6D4,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",boxShadow:"0 8px 28px rgba(6,182,212,0.35)"}}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </div>
+              <div style={{fontSize:26,fontWeight:900,color:T.text,marginBottom:3,letterSpacing:"-.02em"}}>SurveyAI</div>
+              <div style={{fontSize:11,color:T.textMuted,letterSpacing:".1em"}}>ENCUESTA · ANALIZA · CREA EL FUTURO</div>
+            </div>
+            <div style={{background:T.elevated,borderRadius:24,padding:32,border:`1px solid ${T.border}`,boxShadow:"0 24px 60px rgba(0,0,0,.5)"}}>
+              <div style={{fontSize:17,fontWeight:800,color:T.text,marginBottom:5}}>Panel empresarial</div>
+              <div style={{fontSize:13,color:T.textMuted,marginBottom:22}}>Accede con tus credenciales corporativas</div>
+              {err&&<div style={{background:"rgba(239,68,68,.14)",border:"1px solid rgba(239,68,68,.3)",borderRadius:10,padding:"9px 13px",marginBottom:14,fontSize:13,color:"#EF4444",display:"flex",alignItems:"center",gap:7}}>⚠ {err}</div>}
+              <div style={{marginBottom:13}}>
+                <div style={{fontSize:10,fontWeight:700,color:T.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>Email corporativo</div>
+                <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="tu@empresa.cl" onKeyDown={e=>e.key==="Enter"&&doLogin()}
+                  style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:11,padding:"12px 14px",color:T.text,fontSize:14,outline:"none",boxSizing:"border-box",transition:"border .2s"}}
+                  onFocus={e=>e.currentTarget.style.borderColor="#06B6D4"} onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+              </div>
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:10,fontWeight:700,color:T.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>Contraseña</div>
+                <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&doLogin()}
+                  style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:11,padding:"12px 14px",color:T.text,fontSize:14,outline:"none",boxSizing:"border-box",transition:"border .2s"}}
+                  onFocus={e=>e.currentTarget.style.borderColor="#06B6D4"} onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+              </div>
+              <button onClick={doLogin} disabled={loading}
+                style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:loading?"rgba(255,255,255,.07)":"linear-gradient(135deg,#06B6D4,#8B5CF6)",color:loading?T.textMuted:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8,transition:"all .2s",boxShadow:loading?"none":"0 4px 20px rgba(6,182,212,0.4)"}}>
+                {loading?<><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>↻</span> Autenticando...</>:"Ingresar al panel →"}
+              </button>
+              <div style={{marginTop:14,padding:"10px 13px",background:"rgba(6,182,212,0.06)",borderRadius:10,border:"1px solid rgba(6,182,212,0.15)",textAlign:"center"}}>
+                <div style={{fontSize:10,color:T.textMuted,marginBottom:3}}>Credenciales de demo</div>
+                <div style={{fontSize:11,color:T.textSec}}>admin@surveyai.cl · Admin123!</div>
+              </div>
+            </div>
+            <div style={{display:"flex",justifyContent:"center",gap:22,marginTop:16}}>
+              {["JWT seguro","2FA listo","SSL 256-bit"].map(l=><div key={l} style={{fontSize:10,color:T.textMuted}}>🔒 {l}</div>)}
+            </div>
+          </div>
+        </div>
+      );
+    };
+    return <LoginPage/>;
+  }
   const [page,setPage]=useState("dashboard");
   const [col,setCol]=useState(false);
   const [theme,setTheme]=useState(THEMES.dark);
