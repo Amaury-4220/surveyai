@@ -1,4 +1,6 @@
 import { useState, useCallback, createContext, useContext, useEffect } from "react";
+import { Bunker } from "./bunker.js";
+import { guardarEncuesta, escucharRespuestas, escucharStats } from "./firebase.js";
 import {
   LayoutDashboard, FileText, Layers, Sparkles, MessageSquare, BarChart3, Users, Zap,
   Puzzle, Settings, ChevronLeft, ChevronRight, Bell, Search, Plus, MoreHorizontal,
@@ -1170,20 +1172,10 @@ Genera entre 3 y 6 preguntas coherentes con el objetivo del negocio.`;
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          system: SYSTEM_PROMPT,
-          messages:[{role:"user",content:`Objetivo de negocio: ${prompt}\n\nGenera la encuesta en JSON.`}]
-        })
-      });
-      const data = await res.json();
-      const text = data.content?.find(b=>b.type==="text")?.text||"";
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
+      // Protocolo Búnker — llamada a través del agente fantasma
+      const data = await Bunker.generarEncuesta(prompt, "es", 5);
+      if (!data) return; // sesión expirada — redirigido
+      const parsed = data.encuesta;
       setResult(parsed);
     } catch(e) {
       setError("No se pudo generar. Verifica tu conexión o intenta de nuevo.");
@@ -1728,6 +1720,82 @@ function SettingsPage() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Login Screen (top-level, outside App) ────────────
+function SurveyAILogin({ onSuccess }) {
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const T = THEMES.dark;
+
+  const doLogin = () => {
+    if (!email || !pass) { setErr("Completa todos los campos"); return; }
+    setLoading(true); setErr("");
+    setTimeout(() => {
+      setLoading(false);
+      if (email === "admin@surveyai.cl" && pass === "Admin123!") {
+        try { localStorage.setItem("sai_session", "1"); } catch {}
+        onSuccess();
+      } else {
+        setErr("Credenciales incorrectas. Demo: admin@surveyai.cl / Admin123!");
+      }
+    }, 1300);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Inter,sans-serif" }}>
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}input,button{font-family:inherit}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}"}</style>
+      <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+        {[0, 1, 2].map(i => <div key={i} style={{ position: "absolute", borderRadius: "50%", background: ["rgba(6,182,212,0.07)", "rgba(139,92,246,0.05)", "rgba(6,182,212,0.04)"][i], width: [300, 200, 400][i], height: [300, 200, 400][i], left: ["-10%", "60%", "30%"][i], top: ["-10%", "70%", "-20%"][i], filter: "blur(60px)" }} />)}
+      </div>
+      <div style={{ width: "100%", maxWidth: 440, position: "relative", zIndex: 1 }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: "linear-gradient(135deg,#06B6D4,#8B5CF6)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", boxShadow: "0 8px 28px rgba(6,182,212,0.35)" }}>
+            <BarChart3 size={30} color="#fff" />
+          </div>
+          <div style={{ fontSize: 26, fontWeight: 900, color: T.text, marginBottom: 3, letterSpacing: "-.02em" }}>SurveyAI</div>
+          <div style={{ fontSize: 11, color: T.textMuted, letterSpacing: ".1em" }}>ENCUESTA · ANALIZA · CREA EL FUTURO</div>
+        </div>
+        <div style={{ background: T.elevated, borderRadius: 24, padding: 32, border: `1px solid ${T.border}`, boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: T.text, marginBottom: 5 }}>Panel empresarial</div>
+          <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 22 }}>Accede con tus credenciales corporativas</div>
+          {err && <div style={{ background: "rgba(239,68,68,.14)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 10, padding: "9px 13px", marginBottom: 14, fontSize: 13, color: "#EF4444", display: "flex", alignItems: "center", gap: 7 }}>⚠ {err}</div>}
+          <div style={{ marginBottom: 13 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>Email corporativo</div>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@empresa.cl" onKeyDown={e => e.key === "Enter" && doLogin()}
+              style={{ width: "100%", background: T.bg, border: `1.5px solid ${T.border}`, borderRadius: 11, padding: "12px 14px", color: T.text, fontSize: 14, outline: "none", boxSizing: "border-box", transition: "border .2s" }}
+              onFocus={e => e.currentTarget.style.borderColor = "#06B6D4"} onBlur={e => e.currentTarget.style.borderColor = T.border} />
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>Contraseña</div>
+            <div style={{ position: "relative" }}>
+              <input type={showPass ? "text" : "password"} value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" onKeyDown={e => e.key === "Enter" && doLogin()}
+                style={{ width: "100%", background: T.bg, border: `1.5px solid ${T.border}`, borderRadius: 11, padding: "12px 44px 12px 14px", color: T.text, fontSize: 14, outline: "none", boxSizing: "border-box", transition: "border .2s" }}
+                onFocus={e => e.currentTarget.style.borderColor = "#06B6D4"} onBlur={e => e.currentTarget.style.borderColor = T.border} />
+              <div onClick={() => setShowPass(v => !v)} style={{ position: "absolute", right: 13, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: T.textMuted }}>
+                {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+              </div>
+            </div>
+          </div>
+          <button onClick={doLogin} disabled={loading}
+            style={{ width: "100%", padding: "13px", borderRadius: 12, border: "none", background: loading ? "rgba(255,255,255,.07)" : "linear-gradient(135deg,#06B6D4,#8B5CF6)", color: loading ? T.textMuted : "#fff", fontSize: 15, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all .2s", boxShadow: loading ? "none" : "0 4px 20px rgba(6,182,212,0.4)" }}>
+            {loading ? <><span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>↻</span> Autenticando...</> : "Ingresar al panel →"}
+          </button>
+          <div style={{ marginTop: 14, padding: "10px 13px", background: "rgba(6,182,212,0.06)", borderRadius: 10, border: "1px solid rgba(6,182,212,0.15)", textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 3 }}>Credenciales de demo</div>
+            <div style={{ fontSize: 11, color: T.textSec }}>admin@surveyai.cl · Admin123!</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 22, marginTop: 16 }}>
+          {["JWT seguro", "2FA listo", "SSL 256-bit"].map(l => <div key={l} style={{ fontSize: 10, color: T.textMuted }}>🔒 {l}</div>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const PAGE_TITLES = {
   dashboard:"Dashboard", surveys:"Encuestas", builder:"Constructor de Encuestas",
   ai:"IA Generadora", responses:"Respuestas", analytics:"Analíticas",
@@ -1735,7 +1803,79 @@ const PAGE_TITLES = {
   integrations:"Integraciones", settings:"Configuración",
 };
 
+
+// ─── App Login Gate ───────────────────────────────────
+function AppLogin({ onSuccess }) {
+  const T = THEMES.dark;
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const doLogin = () => {
+    if (!email || !pass) { setErr("Completa todos los campos"); return; }
+    setLoading(true); setErr("");
+    setTimeout(() => {
+      setLoading(false);
+      if (email === "admin@surveyai.cl" && pass === "Admin123!") {
+        try { localStorage.setItem("sai_session", "1"); } catch {}
+        onSuccess();
+      } else {
+        setErr("Credenciales incorrectas. Demo: admin@surveyai.cl / Admin123!");
+      }
+    }, 1300);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}input,button{font-family:inherit}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}"}</style>
+      <div style={{position:"fixed",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+        {[0,1,2].map(i=><div key={i} style={{position:"absolute",borderRadius:"50%",background:["rgba(6,182,212,0.07)","rgba(139,92,246,0.05)","rgba(6,182,212,0.04)"][i],width:[300,200,400][i],height:[300,200,400][i],left:["-10%","60%","30%"][i],top:["-10%","70%","-20%"][i],filter:"blur(60px)"}}/>)}
+      </div>
+      <div style={{width:"100%",maxWidth:420,position:"relative",zIndex:1}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:72,height:72,borderRadius:20,background:"linear-gradient(135deg,#06B6D4,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",boxShadow:"0 8px 28px rgba(6,182,212,0.35)"}}>
+            <BarChart3 size={30} color="#fff"/>
+          </div>
+          <div style={{fontSize:26,fontWeight:900,color:T.text,marginBottom:3,letterSpacing:"-.02em"}}>SurveyAI</div>
+          <div style={{fontSize:11,color:T.textMuted,letterSpacing:".1em"}}>PANEL EMPRESARIAL</div>
+        </div>
+        <div style={{background:T.elevated,borderRadius:24,padding:32,border:`1px solid ${T.border}`,boxShadow:"0 24px 60px rgba(0,0,0,.5)"}}>
+          <div style={{fontSize:17,fontWeight:800,color:T.text,marginBottom:5}}>Iniciar sesión</div>
+          <div style={{fontSize:13,color:T.textMuted,marginBottom:22}}>Accede con tus credenciales corporativas</div>
+          {err && <div style={{background:"rgba(239,68,68,.14)",border:"1px solid rgba(239,68,68,.3)",borderRadius:10,padding:"9px 13px",marginBottom:14,fontSize:13,color:"#EF4444"}}>{err}</div>}
+          <div style={{marginBottom:13}}>
+            <div style={{fontSize:10,fontWeight:700,color:T.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>Email corporativo</div>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="tu@empresa.cl" onKeyDown={e=>e.key==="Enter"&&doLogin()}
+              style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:11,padding:"12px 14px",color:T.text,fontSize:14,outline:"none",boxSizing:"border-box"}}
+              onFocus={e=>e.currentTarget.style.borderColor="#06B6D4"} onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+          </div>
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:10,fontWeight:700,color:T.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>Contraseña</div>
+            <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&doLogin()}
+              style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:11,padding:"12px 14px",color:T.text,fontSize:14,outline:"none",boxSizing:"border-box"}}
+              onFocus={e=>e.currentTarget.style.borderColor="#06B6D4"} onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+          </div>
+          <button onClick={doLogin} disabled={loading}
+            style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:loading?"rgba(255,255,255,.07)":"linear-gradient(135deg,#06B6D4,#8B5CF6)",color:loading?T.textMuted:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:loading?"none":"0 4px 20px rgba(6,182,212,0.4)"}}>
+            {loading?"Autenticando...":"Ingresar →"}
+          </button>
+          <div style={{marginTop:14,padding:"10px 13px",background:"rgba(6,182,212,0.06)",borderRadius:10,border:"1px solid rgba(6,182,212,0.15)",textAlign:"center"}}>
+            <div style={{fontSize:10,color:T.textMuted,marginBottom:3}}>Credenciales de demo</div>
+            <div style={{fontSize:11,color:T.textSec}}>admin@surveyai.cl · Admin123!</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [loggedIn, setLoggedIn] = useState(() => {
+    try { return !!localStorage.getItem("sai_session"); } catch { return false; }
+  });
+  if (!loggedIn) return <SurveyAILogin onSuccess={() => setLoggedIn(true)} />;
+
   const [page,setPage]=useState("dashboard");
   const [col,setCol]=useState(false);
   const [theme,setTheme]=useState(THEMES.dark);
