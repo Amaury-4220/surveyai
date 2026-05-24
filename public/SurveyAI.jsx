@@ -1140,6 +1140,7 @@ function Builder({ setPreview }) {
 function AIGenerator({ setPreview }) {
   const T = useT();
   const [prompt,setPrompt]=useState("");
+  const [numPreguntas,setNumPreguntas]=useState(10);
   const [loading,setLoading]=useState(false);
   const [result,setResult]=useState(null);
   const [error,setError]=useState(null);
@@ -1173,7 +1174,7 @@ Genera entre 3 y 6 preguntas coherentes con el objetivo del negocio.`;
     setResult(null);
     try {
       // Protocolo Búnker — llamada a través del agente fantasma
-      const data = await Bunker.generarEncuesta(prompt, "es", 5);
+      const data = await Bunker.generarEncuesta(prompt, "es", numPreguntas);
       if (!data) return; // sesión expirada — redirigido
       const parsed = data.encuesta;
       setResult(parsed);
@@ -1218,13 +1219,25 @@ Genera entre 3 y 6 preguntas coherentes con el objetivo del negocio.`;
             <ThemedInput multiline value={prompt} onChange={e=>setPrompt(e.target.value)}
               placeholder="Ej: Necesito una encuesta para evaluar satisfacción post-compra con NPS, preguntas de seguimiento por segmento y descarte automático para compradores recientes..."/>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}>
-              <div style={{fontSize:11,color:T.textMuted}}>
-                Generará JSON con salto_logico, FIN_CON_DESCARTE y max_opciones
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                <div style={{fontSize:11,color:T.textMuted}}>
+                  Generará JSON con salto_logico y FIN_CON_DESCARTE
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:12,color:T.textSec}}>Preguntas:</span>
+                  <select value={numPreguntas} onChange={e=>setNumPreguntas(Number(e.target.value))}
+                    style={{background:T.inputBg,border:`1px solid ${T.border}`,borderRadius:8,
+                      padding:"6px 10px",color:T.text,fontSize:13,fontFamily:"inherit",outline:"none"}}>
+                    {[10,15,20,25,30,35,40,45,50].map(n=>(
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <Btn icon={Wand2} onClick={generate} disabled={!prompt.trim()||loading}
+                    s={{background:`linear-gradient(135deg,${T.primary},${T.secondary})`}}>
+                    Generar con IA
+                  </Btn>
+                </div>
               </div>
-              <Btn icon={Wand2} onClick={generate} disabled={!prompt.trim()||loading}
-                s={{background:`linear-gradient(135deg,${T.primary},${T.secondary})`}}>
-                Generar con IA
-              </Btn>
             </div>
           </Card>
 
@@ -1871,11 +1884,10 @@ function AppLogin({ onSuccess }) {
 }
 
 export default function App() {
+  // ALL hooks must be declared before any conditional return
   const [loggedIn, setLoggedIn] = useState(() => {
     try { return !!localStorage.getItem("sai_session"); } catch { return false; }
   });
-  if (!loggedIn) return <SurveyAILogin onSuccess={() => setLoggedIn(true)} />;
-
   const [page,setPage]=useState("dashboard");
   const [col,setCol]=useState(false);
   const [theme,setTheme]=useState(THEMES.dark);
@@ -1896,6 +1908,9 @@ export default function App() {
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   },[]);
+
+  // Conditional return AFTER all hooks
+  if (!loggedIn) return <SurveyAILogin onSuccess={() => setLoggedIn(true)} />;
 
   const pageContent = {
     dashboard: <Dashboard setPreview={setPreview}/>,
