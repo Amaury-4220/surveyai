@@ -1,4 +1,3 @@
-
 /**
  * ╔══════════════════════════════════════════════════════════════╗
  * ║         SURVEYAI — AGENTE FANTASMA v1.0                     ║
@@ -180,7 +179,7 @@ exports.handler = async (event) => {
 
       // ── GENERAR ENCUESTA CON IA ───────────────────────
       case "generar_encuesta": {
-        const { objetivo, idioma = "es", num_preguntas = 5 } = datos || {};
+        const { objetivo, idioma = "es", num_preguntas = 10 } = datos || {};
 
         if (!objetivo || objetivo.length < 10) {
           return secureResponse(400, { error: "Describe tu objetivo con más detalle" });
@@ -215,7 +214,7 @@ Estructura exacta:
 }
 Tipos válidos: seleccion_unica, seleccion_multiple (agrega max_opciones en reglas), nps, likert, texto_corto.
 SIEMPRE incluye al menos un salto_logico con FIN_CON_DESCARTE para filtrar participantes no calificados.
-Genera exactamente ${num_preguntas} preguntas coherentes con el objetivo.`;
+Genera exactamente ${num_preguntas} preguntas coherentes con el objetivo. Si son más de 20 preguntas, organízalas en secciones temáticas usando el campo "seccion" en cada pregunta.`;
 
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
