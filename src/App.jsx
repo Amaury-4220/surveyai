@@ -1,4 +1,6 @@
 import { useState, useCallback, createContext, useContext, useEffect } from "react";
+import { Bunker } from "./bunker.js";
+import { guardarEncuesta, escucharRespuestas, escucharStats } from "./firebase.js";
 import {
   LayoutDashboard, FileText, Layers, Sparkles, MessageSquare, BarChart3, Users, Zap,
   Puzzle, Settings, ChevronLeft, ChevronRight, Bell, Search, Plus, MoreHorizontal,
@@ -1170,20 +1172,10 @@ Genera entre 3 y 6 preguntas coherentes con el objetivo del negocio.`;
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          system: SYSTEM_PROMPT,
-          messages:[{role:"user",content:`Objetivo de negocio: ${prompt}\n\nGenera la encuesta en JSON.`}]
-        })
-      });
-      const data = await res.json();
-      const text = data.content?.find(b=>b.type==="text")?.text||"";
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
+      // Protocolo Búnker — llamada a través del agente fantasma
+      const data = await Bunker.generarEncuesta(prompt, "es", 5);
+      if (!data) return; // sesión expirada — redirigido
+      const parsed = data.encuesta;
       setResult(parsed);
     } catch(e) {
       setError("No se pudo generar. Verifica tu conexión o intenta de nuevo.");
@@ -1879,11 +1871,10 @@ function AppLogin({ onSuccess }) {
 }
 
 export default function App() {
+  // ALL hooks must be declared before any conditional return
   const [loggedIn, setLoggedIn] = useState(() => {
     try { return !!localStorage.getItem("sai_session"); } catch { return false; }
   });
-  if (!loggedIn) return <SurveyAILogin onSuccess={() => setLoggedIn(true)} />;
-
   const [page,setPage]=useState("dashboard");
   const [col,setCol]=useState(false);
   const [theme,setTheme]=useState(THEMES.dark);
@@ -1904,6 +1895,9 @@ export default function App() {
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   },[]);
+
+  // Conditional return AFTER all hooks
+  if (!loggedIn) return <SurveyAILogin onSuccess={() => setLoggedIn(true)} />;
 
   const pageContent = {
     dashboard: <Dashboard setPreview={setPreview}/>,
