@@ -1,5 +1,5 @@
-
 import { useState, useEffect, useCallback } from "react";
+import { guardarRespuesta } from "./firebase.js";
 import {
   Eye, EyeOff, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle,
   AlertCircle, RefreshCw, Shield, Check, X, Send, MapPin,
@@ -353,7 +353,9 @@ function SurveyForm({survey,user,jornada,online,onComplete,onDiscard}){
       const p=survey.preguntas.find(p=>p.id===pid);
       if(p?.reglas?.salto_logico?.[val]==="FIN_CON_DESCARTE"){
         setDiscarded({opcion:val,pregunta_id:pid});
-        Store.queue.add({encuesta_id:survey.encuesta_id,encuestador_id:user.id,es_descarte:true,pregunta_descarte_id:pid,jornada,respuestas:{[pid]:val}});
+        const discPayload={encuesta_id:survey.encuesta_id,encuestador_id:user.id,es_descarte:true,pregunta_descarte_id:pid,jornada,respuestas:{[pid]:val}};
+        if(navigator.onLine){guardarRespuesta(discPayload).catch(()=>Store.queue.add(discPayload));}
+        else{Store.queue.add(discPayload);}
         setTimeout(()=>onDiscard(),2500);
       }
     } else if(tipo==="seleccion_multiple"){
@@ -374,8 +376,12 @@ function SurveyForm({survey,user,jornada,online,onComplete,onDiscard}){
     setSending(true);
     const payload={encuesta_id:survey.encuesta_id,encuestador_id:user.id,es_descarte:false,jornada,respuestas:resp};
     if(online){
-      try{await new Promise(r=>setTimeout(r,1200));setSending(false);setSuccess(true);setTimeout(()=>onComplete(false),2000);}
-      catch{Store.queue.add(payload);setSending(false);onComplete(true);}
+      try{
+        await guardarRespuesta(payload);
+        setSending(false);setSuccess(true);setTimeout(()=>onComplete(false),2000);
+      } catch {
+        Store.queue.add(payload);setSending(false);onComplete(true);
+      }
     } else {Store.queue.add(payload);setSending(false);onComplete(true);}
   };
 
