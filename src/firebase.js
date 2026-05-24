@@ -1,20 +1,20 @@
 // ╔══════════════════════════════════════════════════════════════╗
 // ║         SURVEYAI — FIREBASE CLIENT                          ║
-// ║         Conexión en tiempo real con Realtime Database       ║
+// ║         Credenciales via variables de entorno Vite          ║
 // ╚══════════════════════════════════════════════════════════════╝
 
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, push, onValue, off, set, get, query, orderByChild, limitToLast } from "firebase/database";
+import { getDatabase, ref, push, onValue, off, query, orderByChild, limitToLast } from "firebase/database";
 
-// Configuración Firebase — proyecto encuestador-8c4a8
+// Credenciales desde variables de entorno — nunca hardcodeadas
 const firebaseConfig = {
-  apiKey: "AIzaSyCPQr8_WCtNi8F36f6Df6GvEpLG4TPVpQQ",
-  authDomain: "encuestador-8c4a8.firebaseapp.com",
-  databaseURL: "https://encuestador-8c4a8-default-rtdb.firebaseio.com",
-  projectId: "encuestador-8c4a8",
-  storageBucket: "encuestador-8c4a8.firebasestorage.app",
-  messagingSenderId: "319469328936",
-  appId: "1:319469328936:web:3f623ada09008482af331d"
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL:       import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
@@ -33,12 +33,10 @@ export async function guardarRespuesta(payload) {
     jornada: jornada || null,
   };
 
-  // Insertar cabecera
   const cabeceraRef = ref(db, "respuestas_cabecera");
   const nuevaCabecera = await push(cabeceraRef, cabecera);
   const cabecera_id = nuevaCabecera.key;
 
-  // Insertar detalles si no es descarte
   if (!es_descarte && respuestas) {
     const detalles = Object.entries(respuestas)
       .filter(([_, val]) => val !== "" && val !== null && !(Array.isArray(val) && val.length === 0))
@@ -79,8 +77,7 @@ export function escucharRespuestas(encuesta_id, callback) {
     orderByChild("encuesta_id"),
     limitToLast(100)
   );
-
-  const unsub = onValue(q, (snapshot) => {
+  onValue(q, (snapshot) => {
     const data = snapshot.val() || {};
     const respuestas = Object.entries(data)
       .filter(([_, v]) => v.encuesta_id === encuesta_id)
@@ -88,14 +85,13 @@ export function escucharRespuestas(encuesta_id, callback) {
       .sort((a, b) => new Date(b.fecha_captura) - new Date(a.fecha_captura));
     callback(respuestas);
   });
-
   return () => off(q);
 }
 
-// ─── LECTURA — Obtener encuestas del mandante ─────────
+// ─── LECTURA — Escuchar encuestas ────────────────────
 export function escucharEncuestas(mandante_id, callback) {
   const encuestasRef = ref(db, "encuestas");
-  const unsub = onValue(encuestasRef, (snapshot) => {
+  onValue(encuestasRef, (snapshot) => {
     const data = snapshot.val() || {};
     const encuestas = Object.entries(data)
       .filter(([_, v]) => !mandante_id || v.mandante_id === mandante_id)
@@ -106,23 +102,19 @@ export function escucharEncuestas(mandante_id, callback) {
   return () => off(encuestasRef);
 }
 
-// ─── LECTURA — Stats globales en tiempo real ──────────
+// ─── LECTURA — Stats en tiempo real ──────────────────
 export function escucharStats(callback) {
   const cabRef = ref(db, "respuestas_cabecera");
-  const unsub = onValue(cabRef, (snapshot) => {
+  onValue(cabRef, (snapshot) => {
     const data = snapshot.val() || {};
     const todas = Object.values(data);
-    const stats = {
+    const hoy = new Date().toDateString();
+    callback({
       total: todas.length,
       completadas: todas.filter(r => !r.es_descarte).length,
       descartes: todas.filter(r => r.es_descarte).length,
-      hoy: todas.filter(r => {
-        const d = new Date(r.fecha_captura);
-        const hoy = new Date();
-        return d.toDateString() === hoy.toDateString();
-      }).length,
-    };
-    callback(stats);
+      hoy: todas.filter(r => new Date(r.fecha_captura).toDateString() === hoy).length,
+    });
   });
   return () => off(cabRef);
 }
