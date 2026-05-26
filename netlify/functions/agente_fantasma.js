@@ -104,73 +104,84 @@ exports.handler = async (event) => {
         const objetivoClean = String(objetivo).replace(/<[^>]+>/g,"").replace(/[<>"]/g,"").slice(0,400);
         const encId = encuesta_id || `enc-${Date.now().toString(36)}`;
 
-        const SESIONES_DEF = {
-          1: {nombre:"Screening inicial", instruccion:"Genera exactamente 5 preguntas de screening. La primera DEBE tener reglas.salto_logico con valor FIN_CON_DESCARTE. Solo tipo seleccion_unica."},
-          2: {nombre:"Dolor del cliente", instruccion:"Genera exactamente 5 preguntas sobre el problema actual. Tipos: seleccion_unica o seleccion_multiple."},
-          3: {nombre:"Validación de precio", instruccion:"Genera exactamente 5 preguntas sobre disposición de pago y comparación. Solo tipo seleccion_unica con 3 opciones."},
-          4: {nombre:"Propuesta de valor", instruccion:"Genera exactamente 4 preguntas de propuesta de valor. Tipos: seleccion_unica, nps."},
-          5: {nombre:"Intención de compra", instruccion:"Genera exactamente 4 preguntas de intención real de compra. Incluye una sobre lista de espera."},
+        const AGENTES = {
+          1: { nombre:"IPSOS — Screening IAT", instruccion:"Genera 5 preguntas de screening psicológico. La primera DEBE tener salto_logico con FIN_CON_DESCARTE. Tipo: seleccion_unica." },
+          2: { nombre:"YouGov — Perfilado", instruccion:"Genera 5 preguntas sobre comportamiento actual y dolor del cliente. Tipos: seleccion_unica, seleccion_multiple." },
+          3: { nombre:"Gallup — Validación", instruccion:"Genera 5 preguntas de validación estadística y disposición de pago. Tipo: seleccion_unica con 3 opciones." },
+          4: { nombre:"Kantar — Valor", instruccion:"Genera 5 preguntas de propuesta de valor con anclaje. Tipos: seleccion_unica, nps." },
+          5: { nombre:"Dynata — Cierre", instruccion:"Genera 5 preguntas de intención real de compra y lista de espera. Tipo: seleccion_unica." },
         };
-        const def = SESIONES_DEF[sesion_actual] || SESIONES_DEF[1];
+        const agente = AGENTES[sesion_actual] || AGENTES[1];
 
-        const system = `Eres experto en investigación de mercado. Responde SOLO con JSON válido, sin texto extra ni markdown.
+        const system = `Eres el ${agente.nombre}, experto en investigación de mercado.
+Responde ÚNICAMENTE con JSON válido. Sin texto, sin markdown, sin explicaciones.
 
-JSON a generar:
+ESTRUCTURA EXACTA:
 {
-  "titulo": "Título claro del estudio",
+  "titulo": "Título descriptivo del estudio",
   "sesion": {
     "sesion": ${sesion_actual},
-    "nombre": "${def.nombre}",
+    "nombre": "${agente.nombre}",
     "preguntas": [
-      {"id":1,"tipo":"seleccion_unica","enunciado":"Pregunta aquí","opciones":["A","B","C"],"reglas":{"requerido":true}}
+      {
+        "id": 1,
+        "tipo": "seleccion_unica",
+        "metodologia": "IAT",
+        "enunciado": "¿Pregunta clara y directa?",
+        "opciones": ["Opción A", "Opción B", "Opción C"],
+        "reglas": { "requerido": true }
+      }
     ]
   }
 }
 
-Objetivo del estudio: ${objetivoClean}
-${def.instruccion}
-IMPORTANTE: Genera solo JSON. Sin explicaciones. Sin markdown.`;
+Instrucción: ${agente.instruccion}
+Contexto del estudio: ${objetivoClean}`;
 
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 9000);
+        const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 800,
+            system,
+            messages: [{ role: "user", content: `Genera sesión ${sesion_actual} para: ${objetivoClean}` }]
+          })
+        });
 
-        try {
-          const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
-            method:"POST",
-            signal: controller.signal,
-            headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","content-type":"application/json"},
-            body:JSON.stringify({
-              model:"claude-haiku-4-5-20251001",
-              max_tokens:600,
-              system,
-              messages:[{role:"user",content:`Sesión ${sesion_actual} para: ${objetivoClean}`}]
-            })
-          });
-          clearTimeout(timeout);
-
-          if (!aiRes.ok) return res(502,{error:"Error de IA"});
-          const aiData = await aiRes.json();
-          const text = aiData.content?.[0]?.text||"";
-          const clean = text.replace(/```json|```/g,"").trim();
-          let resultado;
-          try { resultado = JSON.parse(clean); } catch {
-            return res(500,{error:"Respuesta inválida de IA. Intenta de nuevo."});
-          }
-          log("IA_OK",ip,{sesion:sesion_actual,encId});
-          return res(200,{
-            status:"success",
-            encuesta_id: encId,
-            titulo: resultado.titulo || `Estudio: ${objetivoClean.slice(0,40)}`,
-            objetivo_negocio: objetivoClean,
-            sesion_actual, sesiones_total,
-            sesion: resultado.sesion,
-            es_ultima: sesion_actual >= sesiones_total
-          });
-        } catch(fetchErr) {
-          clearTimeout(timeout);
-          if (fetchErr.name === 'AbortError') return res(504,{error:"Tiempo agotado. Intenta de nuevo."});
-          return res(502,{error:"Error conectando con IA"});
+        if (!aiRes.ok) {
+          log("IA_ERROR", ip, { status: aiRes.status, sesion: sesion_actual });
+          return res(502, { error: `Error IA sesión ${sesion_actual}` });
         }
+
+        const aiData = await aiRes.json();
+        const text = aiData.content?.[0]?.text || "";
+        const clean = text.replace(/```json|```/g, "").trim();
+
+        let resultado;
+        try {
+          resultado = JSON.parse(clean);
+        } catch {
+          log("IA_PARSE_ERROR", ip, { sesion: sesion_actual, text: text.slice(0, 100) });
+          return res(500, { error: "Respuesta de IA inválida. Reintentando..." });
+        }
+
+        log("IA_OK", ip, { sesion: sesion_actual, agente: agente.nombre });
+        return res(200, {
+          status: "success",
+          encuesta_id: encId,
+          titulo: resultado.titulo || `Estudio: ${objetivoClean.slice(0, 40)}`,
+          objetivo_negocio: objetivoClean,
+          agente_nombre: agente.nombre,
+          sesion_actual,
+          sesiones_total,
+          sesion: resultado.sesion,
+          es_ultima: sesion_actual >= sesiones_total
+        });
       }
 
       case "registrar_respuesta": {
