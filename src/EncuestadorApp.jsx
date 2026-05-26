@@ -811,14 +811,24 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [encuestaAsignada, setEncuestaAsignada] = useState(null);
 
   useEffect(() => {
-    // Load assigned survey from URL param or Firebase
     const params = new URLSearchParams(window.location.search);
     const encId = params.get("enc");
     if (encId) {
       import("./firebase.js").then(({ db, ref, get }) => {
-        // Try to load from Firebase
         get(ref(db, `encuestas/${encId}`)).then(snap => {
-          if (snap.exists()) setEncuestaAsignada({ firebase_id: encId, ...snap.val() });
+          if (snap.exists()) {
+            const data = snap.val();
+            // Normalize sesiones — Firebase stores arrays as objects
+            if (data.sesiones && !Array.isArray(data.sesiones)) {
+              data.sesiones = Object.values(data.sesiones).map(s => ({
+                ...s,
+                preguntas: s.preguntas
+                  ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
+                  : []
+              }));
+            }
+            setEncuestaAsignada({ firebase_id: encId, ...data });
+          }
         }).catch(() => {});
       }).catch(() => {});
     }
