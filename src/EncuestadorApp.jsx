@@ -703,14 +703,12 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
 // ═══════════════════════════════════════════════════════════════
 // PANTALLA 4: HOME (lista de encuestas asignadas)
 // ═══════════════════════════════════════════════════════════════
-function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEncuesta, onCerrarJornada }) {
-  // Demo survey for testing
-  const DEMO_SURVEY = {
-    encuesta_id: "e4b2a1f0-demo",
+function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEncuesta, onCerrarJornada, encuestaAsignada }) {
+  const DEMO_SURVEY = encuestaAsignada || {
+    encuesta_id: "demo-001",
     titulo: "Encuesta de prueba — SurveyAI",
     sesiones: [
-      {
-        sesion:1, nombre:"Screening inicial",
+      { sesion:1, nombre:"Screening inicial",
         preguntas:[
           {id:1,tipo:"seleccion_unica",metodologia:"IAT",
             enunciado:"¿Tiene mascotas actualmente en su hogar?",
@@ -720,15 +718,6 @@ function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEnc
             enunciado:"¿Cuál es su mayor complicación al alimentar sus mascotas?",
             opciones:["Espacio de almacenamiento","Gasto económico","Riesgo de consumo cruzado","Ninguna"],
             reglas:{max_opciones:2}},
-        ]
-      },
-      {
-        sesion:2, nombre:"Propuesta de valor",
-        preguntas:[
-          {id:3,tipo:"seleccion_unica",metodologia:"Conjoint",
-            enunciado:"¿Qué certificación le daría más confianza para comprar un alimento unificado?",
-            opciones:["Respaldo de veterinarios","Estudios clínicos","Garantía de palatabilidad"],
-            reglas:{requerido:true}},
         ]
       }
     ]
@@ -819,6 +808,21 @@ function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEnc
 // APP SHELL — CAPA 3
 // ═══════════════════════════════════════════════════════════════
 export default function Layer3Encuestador({ session, onLogout }) {
+  const [encuestaAsignada, setEncuestaAsignada] = useState(null);
+
+  useEffect(() => {
+    // Load assigned survey from URL param or Firebase
+    const params = new URLSearchParams(window.location.search);
+    const encId = params.get("enc");
+    if (encId) {
+      import("../firebase.js").then(({ db, ref, get }) => {
+        // Try to load from Firebase
+        get(ref(db, `encuestas/${encId}`)).then(snap => {
+          if (snap.exists()) setEncuestaAsignada({ firebase_id: encId, ...snap.val() });
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+  }, []);
   const [screen, setScreen] = useState("jornada");
   const [jornada, setJornada] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("sai_jornada")||"null"); } catch { return null; }
