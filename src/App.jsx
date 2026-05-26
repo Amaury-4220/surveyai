@@ -333,236 +333,335 @@ function Dashboard({ encuestas, stats }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// IA GENERADORA — 5 Agentes + Orquestador
+// IA GENERADORA — Orquestador + 5 Agentes + Pantalla animada
 // ═══════════════════════════════════════════════════════════════
 function IAGeneradora({ onEncuestaCreada }) {
   const [objetivo, setObjetivo] = useState("");
-  const [sesiones, setSesiones] = useState(5);
-  const [numPreguntas, setNumPreguntas] = useState(25);
-  const [loading, setLoading] = useState(false);
+  const [sesiones, setSesiones] = useState(3);
+  const [fase, setFase] = useState("input"); // input | generando | resultado
+  const [agenteActivo, setAgenteActivo] = useState(null);
+  const [progreso, setProgreso] = useState(0);
+  const [preguntasFlotantes, setPreguntasFlotantes] = useState([]);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const [agenteActivo, setAgenteActivo] = useState(null);
+  const flotanteIdRef = useRef(0);
 
-  const AGENTES = [
-    { id:"ipsos",   name:"Agente IPSOS",   desc:"Psicología conductual + IAT",     color:T.cyan,   icon:Shield },
-    { id:"yougov",  name:"Agente YouGov",  desc:"Perfilado + Gamificación",        color:T.violet, icon:Users2 },
-    { id:"gallup",  name:"Agente Gallup",  desc:"Rigor estadístico + Muestra",     color:T.green,  icon:BarChart2 },
-    { id:"kantar",  name:"Agente Kantar",  desc:"Validación de comportamiento",    color:T.yellow, icon:Activity },
-    { id:"dynata",  name:"Agente Dynata",  desc:"Anti-fraude + Prompt maestro",    color:T.orange, icon:Database },
+  const AGENTES_INFO = [
+    { id:"ipsos",  name:"IPSOS",  rol:"Psicología conductual",   color:T.cyan,   emoji:"🧠" },
+    { id:"yougov", name:"YouGov", rol:"Perfilado continuo",       color:T.violet, emoji:"👥" },
+    { id:"gallup", name:"Gallup", rol:"Rigor estadístico",        color:T.green,  emoji:"📊" },
+    { id:"kantar", name:"Kantar", rol:"Validación conductual",    color:T.yellow, emoji:"🎯" },
+    { id:"dynata", name:"Dynata", rol:"Anti-fraude + síntesis",   color:T.orange, emoji:"🔒" },
   ];
+
+  const addPreguntaFlotante = (texto) => {
+    const id = ++flotanteIdRef.current;
+    setPreguntasFlotantes(p => [...p.slice(-8), { id, texto, x: 10+Math.random()*70, delay: Math.random()*0.5 }]);
+    setTimeout(() => setPreguntasFlotantes(p => p.filter(q => q.id !== id)), 6000);
+  };
 
   const generate = async () => {
     if (!objetivo.trim() || objetivo.length < 10) {
-      setError("Describe tu idea con más detalle (mínimo 10 caracteres)");
+      setError("Describe tu idea con más detalle");
       return;
     }
-    setLoading(true); setError(null); setResult(null);
+    setFase("generando");
+    setError(null);
+    setProgreso(0);
+    setPreguntasFlotantes([]);
 
-    // Simulate agents working sequentially
-    for (const agente of AGENTES) {
-      setAgenteActivo(agente.id);
-      await new Promise(r => setTimeout(r, 600));
-    }
-    setAgenteActivo("orquestador");
+    const sesionesGeneradas = [];
+    let encuestaId = "";
+    let tituloFinal = "";
 
-    try {
-      // Generar sesión por sesión — evita timeout
-      let encuestaId = "";
-      let tituloFinal = "";
-      const sesionesGeneradas = [];
+    for (let i = 1; i <= sesiones; i++) {
+      const agente = AGENTES_INFO[Math.min(i-1, AGENTES_INFO.length-1)];
+      setAgenteActivo(agente);
+      setProgreso(Math.round(((i-1)/sesiones)*100));
 
-      for (let i = 1; i <= sesiones; i++) {
-        setAgenteActivo(AGENTES[Math.min(i-1, AGENTES.length-1)].id);
-        let retries = 2;
-        let sesionData = null;
-        while (retries > 0 && !sesionData) {
-          try {
-            const res = await bunkerCall("generar_encuesta", {
-              objetivo, sesion_actual: i, sesiones_total: sesiones, encuesta_id: encuestaId
+      // Mostrar preguntas flotantes mientras trabaja
+      const tokens = ["Analizando mercado...", "Detectando dolores...", "Calibrando preguntas...",
+        "Aplicando IAT...", "Validando muestra...", "Procesando datos...",
+        "Generando insights...", "Estructurando sesión...", "Optimizando flujo..."];
+      let tokenIdx = 0;
+      const tokenInterval = setInterval(() => {
+        addPreguntaFlotante(tokens[tokenIdx % tokens.length]);
+        tokenIdx++;
+      }, 800);
+
+      let retries = 3;
+      let sesionData = null;
+
+      while (retries > 0 && !sesionData) {
+        try {
+          const res = await bunkerCall("generar_encuesta", {
+            objetivo,
+            sesion_actual: i,
+            sesiones_total: sesiones,
+            encuesta_id: encuestaId
+          });
+          if (res?.sesion) {
+            sesionData = res;
+            encuestaId = res.encuesta_id || encuestaId;
+            tituloFinal = res.titulo || tituloFinal;
+            sesionesGeneradas.push(res.sesion);
+            // Mostrar preguntas reales flotando
+            res.sesion.preguntas?.slice(0,3).forEach((p, pi) => {
+              setTimeout(() => addPreguntaFlotante(p.enunciado?.slice(0,60)+"..."), pi*400);
             });
-            if (res) {
-              sesionData = res;
-              encuestaId = res.encuesta_id || encuestaId || `enc-${Date.now().toString(36)}`;
-              tituloFinal = res.titulo || tituloFinal;
-              if (res.sesion) sesionesGeneradas.push(res.sesion);
-            }
-          } catch(retryErr) {
-            retries--;
-            if (retries > 0) await new Promise(r => setTimeout(r, 1500));
+          }
+        } catch(e) {
+          retries--;
+          if (retries > 0) {
+            addPreguntaFlotante("Reintentando conexión...");
+            await new Promise(r => setTimeout(r, 2000));
           }
         }
-        if (!sesionData) throw new Error(`Error en sesión ${i}`);
-        await new Promise(r => setTimeout(r, 500));
       }
 
-      setResult({
-        encuesta_id: encuestaId,
-        titulo: tituloFinal,
-        objetivo_negocio: objetivo,
-        sesiones: sesionesGeneradas,
-      });
-    } catch(e) {
-      setError(e.message === "limite_excedido"
-        ? "Límite de generaciones alcanzado. Intenta en 1 hora."
-        : "Error al generar. Verifica tu conexión.");
-    } finally {
-      setLoading(false);
-      setAgenteActivo(null);
+      clearInterval(tokenInterval);
+
+      if (!sesionData) {
+        setError(`Error en sesión ${i}. Intenta de nuevo.`);
+        setFase("input");
+        setAgenteActivo(null);
+        return;
+      }
+
+      setProgreso(Math.round((i/sesiones)*100));
+      await new Promise(r => setTimeout(r, 500));
     }
+
+    setAgenteActivo(null);
+    setProgreso(100);
+    addPreguntaFlotante("¡Estudio completo!");
+
+    const encuestaFinal = {
+      encuesta_id: encuestaId,
+      titulo: tituloFinal,
+      objetivo_negocio: objetivo,
+      sesiones: sesionesGeneradas,
+    };
+
+    await new Promise(r => setTimeout(r, 1500));
+    setResult(encuestaFinal);
+    setFase("resultado");
   };
 
   const guardar = async () => {
     if (!result) return;
     try {
       const id = await guardarEncuesta(result);
-      onEncuestaCreada({ ...result, firebase_id:id });
-      setResult(null); setObjetivo("");
-    } catch(e) {
-      setError("Error al guardar la encuesta");
-    }
+      onEncuestaCreada({ ...result, firebase_id: id });
+      setResult(null); setObjetivo(""); setFase("input"); setProgreso(0);
+    } catch(e) { setError("Error al guardar"); }
   };
 
-  return (
-    <div style={{padding:isMobile?16:24}}>
-      <div style={{marginBottom:24}}>
-        <div style={{fontSize:22,fontWeight:900,color:T.text,marginBottom:3}}>IA Generadora</div>
-        <div style={{fontSize:13,color:T.textMuted}}>
-          5 agentes especializados generan tu estudio de mercado
+  // ── Pantalla de generación animada ──
+  if (fase === "generando") return (
+    <div style={{padding:24,minHeight:"60vh",display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
+
+      {/* Preguntas flotantes */}
+      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+        {preguntasFlotantes.map(q=>(
+          <div key={q.id} style={{
+            position:"absolute",
+            left:`${q.x}%`,
+            bottom:"-10%",
+            fontSize:11,
+            color:`rgba(6,182,212,${0.3+Math.random()*0.4})`,
+            background:`rgba(6,182,212,0.06)`,
+            border:"1px solid rgba(6,182,212,0.15)",
+            borderRadius:20,
+            padding:"4px 12px",
+            maxWidth:220,
+            whiteSpace:"nowrap",
+            overflow:"hidden",
+            textOverflow:"ellipsis",
+            animation:`floatUp 6s ease-out ${q.delay}s forwards`,
+            zIndex:1,
+          }}>{q.texto}</div>
+        ))}
+      </div>
+
+      {/* Centro */}
+      <div style={{textAlign:"center",zIndex:2,position:"relative"}}>
+        {/* Orb animado */}
+        <div style={{position:"relative",width:120,height:120,margin:"0 auto 24px"}}>
+          <div style={{position:"absolute",inset:0,borderRadius:"50%",
+            background:`radial-gradient(circle,${T.cyan}30,transparent 70%)`,
+            animation:"orbPulse 2s ease-in-out infinite"}}/>
+          <div style={{position:"absolute",inset:8,borderRadius:"50%",
+            border:`2px solid ${T.cyan}40`,animation:"orbSpin 3s linear infinite"}}/>
+          <div style={{position:"absolute",inset:16,borderRadius:"50%",
+            border:`2px dashed ${T.violet}30`,animation:"orbSpin 5s linear infinite reverse"}}/>
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",
+            justifyContent:"center",fontSize:36}}>
+            {agenteActivo?.emoji||"🧠"}
+          </div>
+        </div>
+
+        <div style={{fontSize:18,fontWeight:900,color:T.text,marginBottom:6}}>
+          {agenteActivo ? `Agente ${agenteActivo.name}` : "Orquestador"}
+        </div>
+        <div style={{fontSize:13,color:agenteActivo?.color||T.cyan,marginBottom:20,fontWeight:600}}>
+          {agenteActivo?.rol || "Consolidando análisis..."}
+        </div>
+
+        {/* Progress bar */}
+        <div style={{width:240,height:4,background:T.elevated,borderRadius:4,
+          margin:"0 auto 12px",overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${progreso}%`,background:T.grad,
+            borderRadius:4,transition:"width .6s ease"}}/>
+        </div>
+        <div style={{fontSize:11,color:T.textMuted}}>{progreso}% completado</div>
+
+        {/* Agentes dots */}
+        <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:20}}>
+          {AGENTES_INFO.slice(0,sesiones).map((a,i)=>{
+            const done = i < AGENTES_INFO.findIndex(x=>x.id===agenteActivo?.id);
+            const active = agenteActivo?.id === a.id;
+            return (
+              <div key={a.id} style={{display:"flex",flexDirection:"column",
+                alignItems:"center",gap:4}}>
+                <div style={{width:32,height:32,borderRadius:"50%",
+                  background:done?`${T.green}20`:active?`${a.color}25`:T.elevated,
+                  border:`2px solid ${done?T.green:active?a.color:T.border}`,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:14,transition:"all .3s",
+                  boxShadow:active?`0 0 12px ${a.color}50`:"none"}}>
+                  {done?"✓":a.emoji}
+                </div>
+                <div style={{fontSize:9,color:done?T.green:active?a.color:T.textMuted,
+                  fontWeight:active?700:400}}>{a.name}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {!result && (
-        <>
-          <Card s={{marginBottom:16,
-            background:`linear-gradient(135deg,${T.cyan}06,${T.violet}04)`,
-            borderColor:`${T.cyan}20`}}>
-            <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:12}}>
-              ¿Qué quieres validar en el mercado?
-            </div>
-            <textarea value={objetivo} onChange={e=>setObjetivo(e.target.value)}
-              placeholder="Describe tu idea, producto o servicio. Ej: Tengo una idea de alimento unificado para perros y gatos. Quiero saber si hay mercado, a qué precio lo comprarían y qué características son más importantes..."
-              style={{width:"100%",minHeight:120,background:T.bg,
-                border:`1.5px solid ${T.border}`,borderRadius:11,
-                padding:"12px 14px",color:T.text,fontSize:13,resize:"vertical",
-                outline:"none",lineHeight:1.7,boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif"}}
-              onFocus={e=>e.currentTarget.style.borderColor=T.borderHover}
-              onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+      <style>{`
+        @keyframes floatUp{0%{transform:translateY(0);opacity:0}10%{opacity:1}80%{opacity:.8}100%{transform:translateY(-100vh);opacity:0}}
+        @keyframes orbPulse{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.15);opacity:1}}
+        @keyframes orbSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+      `}</style>
+    </div>
+  );
 
-            <div style={{display:"flex",gap:12,marginTop:14,flexWrap:"wrap",alignItems:"center"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:12,color:T.textSec}}>Sesiones:</span>
-                <select value={sesiones} onChange={e=>setSesiones(Number(e.target.value))}
-                  style={{background:T.elevated,border:`1px solid ${T.border}`,borderRadius:8,
-                    padding:"5px 10px",color:T.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                  {[3,4,5].map(n=><option key={n} value={n}>{n} sesiones</option>)}
-                </select>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:12,color:T.textSec}}>Preguntas:</span>
-                <select value={numPreguntas} onChange={e=>setNumPreguntas(Number(e.target.value))}
-                  style={{background:T.elevated,border:`1px solid ${T.border}`,borderRadius:8,
-                    padding:"5px 10px",color:T.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                  {[10,15,20,25,30].map(n=><option key={n} value={n}>{n} preguntas</option>)}
-                </select>
-              </div>
-              <Btn icon={Wand2} onClick={generate} disabled={!objetivo.trim()||loading}
-                loading={loading}
-                s={{marginLeft:"auto",background:T.grad}}>
-                {loading?"Generando...":"Generar estudio"}
-              </Btn>
-            </div>
-          </Card>
-
-          {/* Agentes status */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
-            {AGENTES.map(a=>{
-              const Icon = a.icon;
-              const isActive = agenteActivo===a.id;
-              const isDone = loading && AGENTES.findIndex(x=>x.id===agenteActivo) > AGENTES.findIndex(x=>x.id===a.id);
-              return (
-                <div key={a.id} style={{padding:"12px 14px",borderRadius:12,
-                  background:isActive?`${a.color}12`:T.card,
-                  border:`1px solid ${isActive?a.color+"40":T.border}`,
-                  transition:"all .3s"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4}}>
-                    <Icon size={13} color={isActive?a.color:isDone?T.green:T.textMuted}/>
-                    <span style={{fontSize:11,fontWeight:700,
-                      color:isActive?a.color:isDone?T.green:T.textSec}}>{a.name}</span>
-                    {isDone&&<Check size={10} color={T.green} style={{marginLeft:"auto"}}/>}
-                    {isActive&&<div style={{width:6,height:6,borderRadius:"50%",
-                      background:a.color,marginLeft:"auto",
-                      animation:"pulse 1s ease-in-out infinite"}}/>}
-                  </div>
-                  <div style={{fontSize:10,color:T.textMuted}}>{a.desc}</div>
-                </div>
-              );
-            })}
+  // ── Resultado ──
+  if (fase === "resultado" && result) return (
+    <div style={{padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:2}}>
+            ✅ Estudio generado
           </div>
-        </>
-      )}
-
-      {error&&(
-        <div style={{padding:"12px 16px",background:`${T.red}12`,border:`1px solid ${T.red}30`,
-          borderRadius:12,display:"flex",alignItems:"center",gap:8,color:T.red,fontSize:13,marginTop:16}}>
-          <AlertCircle size={14}/>{error}
-          <div onClick={()=>setError(null)} style={{marginLeft:"auto",cursor:"pointer"}}><X size={13}/></div>
+          <div style={{fontSize:12,color:T.textSec}}>
+            {result.sesiones?.length} sesiones · {result.sesiones?.reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
+          </div>
         </div>
-      )}
+        <div style={{display:"flex",gap:8}}>
+          <Btn v="ghost" icon={RefreshCw} sm onClick={()=>{setFase("input");setResult(null);}}>Regenerar</Btn>
+          <Btn v="green" icon={Check} sm onClick={guardar}>Guardar</Btn>
+        </div>
+      </div>
 
-      {result&&(
-        <>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:T.green}}/>
-              <span style={{fontSize:14,fontWeight:800,color:T.text}}>Estudio generado</span>
-              <span style={{fontSize:11,color:T.textSec}}>
-                {result.sesiones?.length||0} sesiones · {result.sesiones?.reduce((a,s)=>a+(s.preguntas?.length||0),0)||0} preguntas
+      <Card>
+        <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:4}}>{result.titulo}</div>
+        <div style={{fontSize:12,color:T.textSec,marginBottom:16}}>{result.objetivo_negocio}</div>
+        {result.sesiones?.map((s,si)=>(
+          <div key={si} style={{marginBottom:10,padding:14,borderRadius:12,
+            background:T.elevated,border:`1px solid ${T.border}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{fontSize:10,fontWeight:800,color:T.cyan,
+                background:`${T.cyan}15`,padding:"2px 9px",borderRadius:20}}>
+                Sesión {s.sesion}
+              </span>
+              <span style={{fontSize:12,fontWeight:700,color:T.text}}>{s.nombre}</span>
+              <span style={{fontSize:10,color:T.textMuted,marginLeft:"auto"}}>
+                {s.preguntas?.length||0} preguntas
               </span>
             </div>
-            <div style={{display:"flex",gap:8}}>
-              <Btn v="ghost" icon={RefreshCw} sm onClick={()=>setResult(null)}>Regenerar</Btn>
-              <Btn v="green" icon={Check} sm onClick={guardar}>Guardar encuesta</Btn>
-            </div>
-          </div>
-
-          <Card>
-            <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:4}}>{result.titulo}</div>
-            <div style={{fontSize:12,color:T.textSec,marginBottom:16}}>{result.objetivo_negocio}</div>
-
-            {result.sesiones?.map((s,si)=>(
-              <div key={si} style={{marginBottom:12,padding:14,borderRadius:12,
-                background:T.elevated,border:`1px solid ${T.border}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                  <span style={{fontSize:11,fontWeight:800,color:T.cyan,
-                    background:`${T.cyan}15`,padding:"2px 9px",borderRadius:20}}>
-                    Sesión {s.sesion}
-                  </span>
-                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>{s.nombre}</span>
-                  <span style={{fontSize:10,color:T.textMuted,marginLeft:"auto"}}>
-                    {s.preguntas?.length||0} preguntas
-                  </span>
-                </div>
-                {s.preguntas?.slice(0,2).map((p,pi)=>(
-                  <div key={pi} style={{padding:"8px 10px",borderRadius:8,
-                    background:T.bg,border:`1px solid ${T.border}`,marginBottom:6,
-                    display:"flex",alignItems:"flex-start",gap:8}}>
-                    <span style={{fontSize:9,fontWeight:700,color:T.violet,
-                      background:`${T.violet}15`,padding:"2px 7px",borderRadius:20,
-                      flexShrink:0,marginTop:1}}>{p.metodologia||p.tipo}</span>
-                    <span style={{fontSize:12,color:T.textSec,flex:1}}>{p.enunciado}</span>
-                  </div>
-                ))}
-                {(s.preguntas?.length||0)>2&&(
-                  <div style={{fontSize:10,color:T.textMuted,textAlign:"center",marginTop:4}}>
-                    +{(s.preguntas.length)-2} preguntas más en esta sesión
-                  </div>
-                )}
+            {s.preguntas?.slice(0,2).map((p,pi)=>(
+              <div key={pi} style={{padding:"8px 10px",borderRadius:8,background:T.bg,
+                border:`1px solid ${T.border}`,marginBottom:6,
+                display:"flex",alignItems:"flex-start",gap:8}}>
+                <span style={{fontSize:9,fontWeight:700,color:T.violet,
+                  background:`${T.violet}15`,padding:"2px 7px",borderRadius:20,
+                  flexShrink:0,marginTop:1}}>{p.metodologia||p.tipo}</span>
+                <span style={{fontSize:12,color:T.textSec,flex:1}}>{p.enunciado}</span>
               </div>
             ))}
-          </Card>
-        </>
-      )}
+            {(s.preguntas?.length||0)>2&&(
+              <div style={{fontSize:10,color:T.textMuted,textAlign:"center",marginTop:4}}>
+                +{s.preguntas.length-2} preguntas más
+              </div>
+            )}
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+
+  // ── Input ──
+  return (
+    <div style={{padding:24}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:22,fontWeight:900,color:T.text,marginBottom:3}}>IA Generadora</div>
+        <div style={{fontSize:13,color:T.textMuted}}>5 agentes especializados generan tu estudio</div>
+      </div>
+
+      <Card s={{marginBottom:16,background:`linear-gradient(135deg,${T.cyan}06,${T.violet}04)`,
+        borderColor:`${T.cyan}20`}}>
+        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:12}}>
+          ¿Qué quieres validar en el mercado?
+        </div>
+        <textarea value={objetivo} onChange={e=>setObjetivo(e.target.value)}
+          placeholder="Describe tu idea o producto. Ej: Tengo un alimento unificado para perros y gatos y quiero validar si hay mercado real..."
+          rows={4}
+          style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:11,
+            padding:"12px 14px",color:T.text,fontSize:13,resize:"vertical",outline:"none",
+            lineHeight:1.7,boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif"}}
+          onFocus={e=>e.currentTarget.style.borderColor=T.borderHover}
+          onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+
+        <div style={{display:"flex",gap:12,marginTop:14,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,color:T.textSec}}>Sesiones:</span>
+            <select value={sesiones} onChange={e=>setSesiones(Number(e.target.value))}
+              style={{background:T.elevated,border:`1px solid ${T.border}`,borderRadius:8,
+                padding:"5px 10px",color:T.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
+              {[2,3,4,5].map(n=><option key={n} value={n}>{n} sesiones</option>)}
+            </select>
+          </div>
+          <Btn icon={Sparkles} onClick={generate}
+            disabled={!objetivo.trim()||objetivo.length<10}
+            s={{marginLeft:"auto"}}>
+            Generar estudio
+          </Btn>
+        </div>
+
+        {error&&(
+          <div style={{marginTop:12,padding:"10px 14px",background:`${T.red}12`,
+            border:`1px solid ${T.red}30`,borderRadius:10,fontSize:12,color:T.red,
+            display:"flex",alignItems:"center",gap:7}}>
+            <AlertCircle size={13}/>{error}
+          </div>
+        )}
+      </Card>
+
+      {/* Agentes preview */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+        {AGENTES_INFO.map(a=>(
+          <div key={a.id} style={{padding:"12px 14px",borderRadius:12,background:T.card,
+            border:`1px solid ${T.border}`}}>
+            <div style={{fontSize:16,marginBottom:4}}>{a.emoji}</div>
+            <div style={{fontSize:11,fontWeight:700,color:a.color}}>{a.name}</div>
+            <div style={{fontSize:10,color:T.textMuted}}>{a.rol}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
