@@ -374,14 +374,26 @@ function IAGeneradora({ onEncuestaCreada }) {
 
       for (let i = 1; i <= sesiones; i++) {
         setAgenteActivo(AGENTES[Math.min(i-1, AGENTES.length-1)].id);
-        const res = await bunkerCall("generar_encuesta", {
-          objetivo, sesion_actual: i, sesiones_total: sesiones, encuesta_id: encuestaId
-        });
-        if (!res) return;
-        encuestaId = res.encuesta_id || encuestaId;
-        tituloFinal = res.titulo || tituloFinal;
-        if (res.sesion) sesionesGeneradas.push(res.sesion);
-        await new Promise(r => setTimeout(r, 400));
+        let retries = 2;
+        let sesionData = null;
+        while (retries > 0 && !sesionData) {
+          try {
+            const res = await bunkerCall("generar_encuesta", {
+              objetivo, sesion_actual: i, sesiones_total: sesiones, encuesta_id: encuestaId
+            });
+            if (res) {
+              sesionData = res;
+              encuestaId = res.encuesta_id || encuestaId || `enc-${Date.now().toString(36)}`;
+              tituloFinal = res.titulo || tituloFinal;
+              if (res.sesion) sesionesGeneradas.push(res.sesion);
+            }
+          } catch(retryErr) {
+            retries--;
+            if (retries > 0) await new Promise(r => setTimeout(r, 1500));
+          }
+        }
+        if (!sesionData) throw new Error(`Error en sesión ${i}`);
+        await new Promise(r => setTimeout(r, 500));
       }
 
       setResult({
