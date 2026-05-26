@@ -98,45 +98,86 @@ exports.handler = async (event) => {
       case "generar_encuesta": {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503,{error:"IA no configurada"});
-        const { objetivo, sesion_actual=1, sesiones_total=3, encuesta_id="" } = datos || {};
+        const { objetivo, sesion_actual=1, sesiones_total=5, encuesta_id="", preguntas_por_sesion=10 } = datos || {};
         if (!objetivo || objetivo.length < 10) return res(400,{error:"Describe tu objetivo"});
 
-        const objetivoClean = String(objetivo).replace(/<[^>]+>/g,"").replace(/[<>"]/g,"").slice(0,400);
+        const objetivoClean = String(objetivo).replace(/<[^>]+>/g,"").replace(/[<>"]/g,"").slice(0,600);
         const encId = encuesta_id || `enc-${Date.now().toString(36)}`;
 
         const AGENTES = {
-          1: { nombre:"IPSOS — Screening IAT", instruccion:"Genera 5 preguntas de screening psicológico. La primera DEBE tener salto_logico con FIN_CON_DESCARTE. Tipo: seleccion_unica." },
-          2: { nombre:"YouGov — Perfilado", instruccion:"Genera 5 preguntas sobre comportamiento actual y dolor del cliente. Tipos: seleccion_unica, seleccion_multiple." },
-          3: { nombre:"Gallup — Validación", instruccion:"Genera 5 preguntas de validación estadística y disposición de pago. Tipo: seleccion_unica con 3 opciones." },
-          4: { nombre:"Kantar — Valor", instruccion:"Genera 5 preguntas de propuesta de valor con anclaje. Tipos: seleccion_unica, nps." },
-          5: { nombre:"Dynata — Cierre", instruccion:"Genera 5 preguntas de intención real de compra y lista de espera. Tipo: seleccion_unica." },
+          1: { nombre:"IPSOS — Screening + IAT", metodologia:"IAT",
+               instruccion:`Genera ${preguntas_por_sesion} preguntas de screening psicológico de alta calidad.
+La primera pregunta DEBE tener salto_logico con FIN_CON_DESCARTE para filtrar a quien no califica.
+Incluye preguntas IAT (tiempo de respuesta implícito) mezcladas con preguntas directas.
+Detecta el perfil del entrevistado sin que se den cuenta.
+Tipos: seleccion_unica, iat.` },
+          2: { nombre:"YouGov — Dolor + Comportamiento", metodologia:"Conductual",
+               instruccion:`Genera ${preguntas_por_sesion} preguntas profundas sobre el dolor actual del cliente.
+Pregunta sobre hábitos, frecuencia, costo del problema actual, alternativas que usan hoy.
+Gamifica las preguntas para mantener el engagement.
+Tipos: seleccion_unica, seleccion_multiple (max_opciones: 2 o 3).` },
+          3: { nombre:"Gallup — Validación Estadística", metodologia:"Conjoint",
+               instruccion:`Genera ${preguntas_por_sesion} preguntas de validación con rigor estadístico.
+Incluye experimentos Conjoint de elección forzada (3 opciones comparativas).
+Mide disposición real de pago usando preguntas indirectas de comparación.
+Para preguntas conjoint, incluye campo opciones_conjoint con array de 3 objetos con atributos y precio.
+Tipos: seleccion_unica, conjoint.` },
+          4: { nombre:"Kantar — Propuesta de Valor", metodologia:"Anclaje",
+               instruccion:`Genera ${preguntas_por_sesion} preguntas de validación de propuesta de valor con anclaje psicológico.
+Presenta primero el competidor líder como ancla, luego la propuesta nueva.
+Detecta el Efecto Sospecha — en qué punto el precio bajo genera desconfianza.
+Incluye preguntas NPS y Likert de satisfacción proyectada.
+Tipos: seleccion_unica, nps, likert.` },
+          5: { nombre:"Dynata — Intención Real de Compra", metodologia:"Validación",
+               instruccion:`Genera ${preguntas_por_sesion} preguntas de intención REAL de compra.
+NO preguntar directamente "¿compraría?". Usar preguntas de comportamiento futuro.
+Incluir pregunta de lista de espera y depósito reembolsable.
+La última pregunta debe ser abierta: "¿Qué necesitaría para comprarlo hoy mismo?".
+Tipos: seleccion_unica, texto_corto.` },
         };
+
         const agente = AGENTES[sesion_actual] || AGENTES[1];
 
-        const system = `Eres el ${agente.nombre}, experto en investigación de mercado.
-Responde ÚNICAMENTE con JSON válido. Sin texto, sin markdown, sin explicaciones.
+        const system = `Eres el ${agente.nombre}, el mejor experto mundial en investigación de mercado.
+Tu trabajo es generar preguntas de MÁXIMA CALIDAD para un estudio de mercado profesional.
+Responde ÚNICAMENTE con JSON válido. Sin texto adicional, sin markdown, sin explicaciones.
 
-ESTRUCTURA EXACTA:
+ESTRUCTURA JSON EXACTA:
 {
-  "titulo": "Título descriptivo del estudio",
+  "titulo": "Título profesional y descriptivo del estudio de mercado",
   "sesion": {
     "sesion": ${sesion_actual},
     "nombre": "${agente.nombre}",
+    "metodologia": "${agente.metodologia}",
     "preguntas": [
       {
         "id": 1,
         "tipo": "seleccion_unica",
         "metodologia": "IAT",
-        "enunciado": "¿Pregunta clara y directa?",
-        "opciones": ["Opción A", "Opción B", "Opción C"],
-        "reglas": { "requerido": true }
+        "enunciado": "Pregunta clara, directa y profesional",
+        "opciones": ["Opción A detallada", "Opción B detallada", "Opción C detallada"],
+        "reglas": {
+          "requerido": true,
+          "salto_logico": {"Opción que descarta": "FIN_CON_DESCARTE"}
+        }
       }
     ]
   }
 }
 
-Instrucción: ${agente.instruccion}
-Contexto del estudio: ${objetivoClean}`;
+CONTEXTO DEL ESTUDIO:
+Objetivo de negocio: ${objetivoClean}
+Sesión: ${sesion_actual} de ${sesiones_total}
+
+INSTRUCCIONES ESPECÍFICAS PARA ESTA SESIÓN:
+${agente.instruccion}
+
+REGLAS DE CALIDAD INAMOVIBLES:
+- Cada pregunta debe ser única y relevante para el objetivo
+- Las opciones deben ser mutuamente excluyentes y exhaustivas
+- El lenguaje debe ser claro, sin jerga técnica
+- Las preguntas deben fluir naturalmente en conversación
+- Incluir variedad de tipos para mantener engagement`;
 
         const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -147,15 +188,15 @@ Contexto del estudio: ${objetivoClean}`;
           },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 800,
+            max_tokens: 4000,
             system,
-            messages: [{ role: "user", content: `Genera sesión ${sesion_actual} para: ${objetivoClean}` }]
+            messages: [{ role: "user", content: `Genera ${preguntas_por_sesion} preguntas de alta calidad para la sesión ${sesion_actual}. Objetivo: ${objetivoClean}` }]
           })
         });
 
         if (!aiRes.ok) {
           log("IA_ERROR", ip, { status: aiRes.status, sesion: sesion_actual });
-          return res(502, { error: `Error IA sesión ${sesion_actual}` });
+          return res(502, { error: `Error IA sesión ${sesion_actual}. Reintentando...` });
         }
 
         const aiData = await aiRes.json();
@@ -166,15 +207,20 @@ Contexto del estudio: ${objetivoClean}`;
         try {
           resultado = JSON.parse(clean);
         } catch {
-          log("IA_PARSE_ERROR", ip, { sesion: sesion_actual, text: text.slice(0, 100) });
-          return res(500, { error: "Respuesta de IA inválida. Reintentando..." });
+          log("IA_PARSE_ERROR", ip, { sesion: sesion_actual });
+          return res(500, { error: "Error de formato. Reintentando sesión..." });
         }
 
-        log("IA_OK", ip, { sesion: sesion_actual, agente: agente.nombre });
+        log("IA_OK", ip, {
+          sesion: sesion_actual,
+          agente: agente.nombre,
+          preguntas: resultado.sesion?.preguntas?.length || 0
+        });
+
         return res(200, {
           status: "success",
           encuesta_id: encId,
-          titulo: resultado.titulo || `Estudio: ${objetivoClean.slice(0, 40)}`,
+          titulo: resultado.titulo || `Estudio: ${objetivoClean.slice(0, 50)}`,
           objetivo_negocio: objetivoClean,
           agente_nombre: agente.nombre,
           sesion_actual,
