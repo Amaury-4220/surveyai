@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom/client";
-import Layer0Login from "./Layer0_Login.jsx";
-import { Session } from "./Layer1_Bunker.js";
+import { Session } from "./bunker.js";
 
+const LoginGate         = React.lazy(() => import("./LoginSurveyAI.jsx"));
 const Layer2Mandante    = React.lazy(() => import("./App.jsx"));
 const Layer3Encuestador = React.lazy(() => import("./EncuestadorApp.jsx"));
 const Layer5SuperAdmin  = React.lazy(() => import("./SuperAdmin.jsx"));
@@ -42,24 +42,18 @@ function App() {
   );
 
   if (path.startsWith("/superadmin")) {
-    if (!session) return <Layer0Login onSuccess={s=>setSession(s)}/>;
-    return <React.Suspense fallback={<LoadingScreen/>}>
-      <Layer5SuperAdmin session={session} onLogout={()=>{Session.clear();setSession(null);}}/>
-    </React.Suspense>;
+    if (!session) return <React.Suspense fallback={<LoadingScreen/>}><LoginGate onSuccess={s=>setSession(s)}/></React.Suspense>;
+    return <React.Suspense fallback={<LoadingScreen/>}><Layer5SuperAdmin session={session} onLogout={()=>{Session.clear();setSession(null);}}/></React.Suspense>;
   }
 
   if (path.startsWith("/encuestador")) {
-    if (!session) return <Layer0Login onSuccess={s=>setSession(s)}/>;
-    return <React.Suspense fallback={<LoadingScreen/>}>
-      <Layer3Encuestador session={session} onLogout={()=>{Session.clear();setSession(null);}}/>
-    </React.Suspense>;
+    if (!session) return <React.Suspense fallback={<LoadingScreen/>}><LoginGate onSuccess={s=>setSession(s)}/></React.Suspense>;
+    return <React.Suspense fallback={<LoadingScreen/>}><Layer3Encuestador session={session} onLogout={()=>{Session.clear();setSession(null);}}/></React.Suspense>;
   }
 
-  if (!session) return <Layer0Login onSuccess={s=>setSession(s)}/>;
+  if (!session) return <React.Suspense fallback={<LoadingScreen/>}><LoginGate onSuccess={s=>setSession(s)}/></React.Suspense>;
 
-  return <React.Suspense fallback={<LoadingScreen/>}>
-    <Layer2Mandante session={session} onLogout={()=>{Session.clear();setSession(null);}}/>
-  </React.Suspense>;
+  return <React.Suspense fallback={<LoadingScreen/>}><Layer2Mandante session={session} onLogout={()=>{Session.clear();setSession(null);}}/></React.Suspense>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
