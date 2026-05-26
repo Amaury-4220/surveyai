@@ -545,9 +545,25 @@ function IAGeneradora({ onEncuestaCreada }) {
     window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
   };
 
+  const [copiado, setCopiado] = useState(false);
   const copyLink = () => {
     if (!result?.link) return;
-    navigator.clipboard.writeText(result.link).catch(()=>{});
+    // Fallback for browsers that block clipboard API
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(result.link).then(() => {
+          setCopiado(true); setTimeout(() => setCopiado(false), 2000);
+        }).catch(() => copyFallback());
+      } else { copyFallback(); }
+    } catch { copyFallback(); }
+  };
+  const copyFallback = () => {
+    const el = document.createElement("textarea");
+    el.value = result?.link || "";
+    el.style.position = "fixed"; el.style.opacity = "0";
+    document.body.appendChild(el); el.focus(); el.select();
+    try { document.execCommand("copy"); setCopiado(true); setTimeout(() => setCopiado(false), 2000); } catch {}
+    document.body.removeChild(el);
   };
 
   // Formato tiempo
@@ -681,11 +697,15 @@ function IAGeneradora({ onEncuestaCreada }) {
               </div>
             </div>
             <div style={{display:"flex",gap:8}}>
+              <Btn v="ghost" icon={ArrowLeft} sm
+                onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}>
+                Volver
+              </Btn>
               <Btn v="ghost" icon={RefreshCw} sm
                 onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}>
                 Regenerar
               </Btn>
-              <Btn v="green" icon={Send} sm onClick={publicar}>Publicar y compartir</Btn>
+              <Btn v="green" icon={Send} sm onClick={publicar}>Publicar</Btn>
             </div>
           </div>
 
@@ -791,20 +811,30 @@ function IAGeneradora({ onEncuestaCreada }) {
             </button>
             <button onClick={copyLink}
               style={{width:"100%",padding:"13px",borderRadius:13,
-                border:`1px solid ${T.border}`,background:T.elevated,
-                color:T.textSec,fontSize:14,fontWeight:600,
+                border:`1px solid ${copiado?T.green:T.border}`,
+                background:copiado?`${T.green}12`:T.elevated,
+                color:copiado?T.green:T.textSec,fontSize:14,fontWeight:600,
                 cursor:"pointer",fontFamily:"inherit",display:"flex",
-                alignItems:"center",justifyContent:"center",gap:9}}>
-              <Link2 size={16}/>Copiar link
+                alignItems:"center",justifyContent:"center",gap:9,transition:"all .2s"}}>
+              {copiado?<><Check size={16}/>¡Link copiado!</>:<><Link2 size={16}/>Copiar link</>}
             </button>
           </div>
 
-          <div style={{marginTop:14,textAlign:"center"}}>
-            <span onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}
-              style={{fontSize:12,color:T.textMuted,cursor:"pointer",
-                textDecoration:"underline"}}>
-              Crear nueva encuesta
-            </span>
+          <div style={{marginTop:16,display:"flex",gap:10}}>
+            <button onClick={()=>{setFase("resultado");}}
+              style={{flex:1,padding:"11px",borderRadius:12,border:`1px solid ${T.border}`,
+                background:T.elevated,color:T.textSec,fontSize:13,fontWeight:600,
+                cursor:"pointer",fontFamily:"inherit",display:"flex",
+                alignItems:"center",justifyContent:"center",gap:6}}>
+              <Eye size={13}/>Ver encuesta
+            </button>
+            <button onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}
+              style={{flex:1,padding:"11px",borderRadius:12,border:`1px solid ${T.border}`,
+                background:T.elevated,color:T.textSec,fontSize:13,fontWeight:600,
+                cursor:"pointer",fontFamily:"inherit",display:"flex",
+                alignItems:"center",justifyContent:"center",gap:6}}>
+              <Plus size={13}/>Nueva encuesta
+            </button>
           </div>
         </div>
       )}
