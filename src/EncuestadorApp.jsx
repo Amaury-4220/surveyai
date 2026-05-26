@@ -1,458 +1,697 @@
-import { useState, useEffect, useCallback } from "react";
-import { guardarRespuesta } from "./firebase.js";
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  SURVEYAI — CAPA 3: APP ENCUESTADOR                         ║
+// ║  Offline First · Jornada · GPS · Sync automático            ║
+// ║  © SurveyAI 2025 — Todos los derechos reservados           ║
+// ╚══════════════════════════════════════════════════════════════╝
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Eye, EyeOff, Mail, Lock, ArrowRight, ArrowLeft, CheckCircle,
-  AlertCircle, RefreshCw, Shield, Check, X, Send, MapPin,
-  Clock, Calendar, Building, Clipboard, Wifi, WifiOff,
-  Upload, User, Key, LogOut, ChevronDown
+  MapPin, Clock, Building, ArrowRight, ArrowLeft, Check, X,
+  Send, RefreshCw, AlertCircle, CheckCircle, Wifi, WifiOff,
+  Upload, LogOut, ChevronDown, User, Phone, Calendar,
+  Smartphone, BarChart3, Activity, Shield, Zap, Eye,
+  MessageCircle, Home, ClipboardList, TrendingUp
 } from "lucide-react";
+import { guardarRespuesta } from "../firebase.js";
 
-// ─── Storage ──────────────────────────────────────────
-const Store = {
-  save:(k,d)=>{try{localStorage.setItem(k,JSON.stringify(d));return true;}catch{return false;}},
-  load:(k)=>{try{const d=localStorage.getItem(k);return d?JSON.parse(d):null;}catch{return null;}},
-  remove:(k)=>{try{localStorage.removeItem(k);}catch{}},
-  queue:{
-    add:(item)=>{const q=Store.load("eq")||[];q.push({...item,queued_at:new Date().toISOString(),local_id:`l-${Date.now()}`});Store.save("eq",q);},
-    get:()=>Store.load("eq")||[],
-    remove:(id)=>{const q=Store.load("eq")||[];Store.save("eq",q.filter(i=>i.local_id!==id));},
-    count:()=>(Store.load("eq")||[]).length,
-  }
+// ─── Design System ────────────────────────────────────────────
+const T = {
+  bg:"#03070E", surface:"#060C18", card:"#090F1E",
+  elevated:"#0C1526", elevated2:"#101C30",
+  border:"rgba(6,182,212,0.1)", borderFocus:"rgba(6,182,212,0.45)",
+  cyan:"#06B6D4", violet:"#7C3AED", green:"#10B981",
+  red:"#EF4444", yellow:"#F59E0B",
+  text:"#F1F5F9", textSec:"#64748B", textMuted:"#1A3050",
+  grad:"linear-gradient(135deg,#06B6D4,#7C3AED)",
 };
 
-// ─── Mock data ────────────────────────────────────────
-const MOCK_USERS = [
-  {id:"enc-001",name:"Carlos Méndez",email:"carlos@surveyai.cl",empresa:"Alimentos del Sur S.A.",tempPass:"Temp2025!",pass:null,firstLogin:true},
-  {id:"enc-002",name:"Ana Ramírez",email:"ana@surveyai.cl",empresa:"Retail Corp Ltda.",tempPass:"Temp2025!",pass:"Ana2025!",firstLogin:false},
+// ─── Offline Queue (localStorage) ────────────────────────────
+const Q = {
+  add: (item) => {
+    try {
+      const q = JSON.parse(localStorage.getItem("sai_q")||"[]");
+      q.push({...item, local_id:`l-${Date.now()}`, queued_at:new Date().toISOString()});
+      localStorage.setItem("sai_q", JSON.stringify(q));
+    } catch {}
+  },
+  get: () => { try { return JSON.parse(localStorage.getItem("sai_q")||"[]"); } catch { return []; } },
+  remove: (id) => {
+    try {
+      const q = JSON.parse(localStorage.getItem("sai_q")||"[]");
+      localStorage.setItem("sai_q", JSON.stringify(q.filter(i=>i.local_id!==id)));
+    } catch {}
+  },
+  count: () => { try { return JSON.parse(localStorage.getItem("sai_q")||"[]").length; } catch { return 0; } },
+};
+
+// ─── Stats store ──────────────────────────────────────────────
+const Stats = {
+  get: () => { try { return JSON.parse(localStorage.getItem("sai_stats")||'{"hoy":0,"total":0,"descartes":0}'); } catch { return {hoy:0,total:0,descartes:0}; } },
+  update: (isDiscard) => {
+    const s = Stats.get();
+    Stats.save({hoy:s.hoy+1,total:s.total+1,descartes:isDiscard?s.descartes+1:s.descartes});
+  },
+  save: (s) => { try { localStorage.setItem("sai_stats",JSON.stringify(s)); } catch {} },
+  resetHoy: () => {
+    const s = Stats.get();
+    const lastReset = localStorage.getItem("sai_last_reset");
+    const hoy = new Date().toDateString();
+    if (lastReset !== hoy) { Stats.save({...s,hoy:0}); localStorage.setItem("sai_last_reset",hoy); }
+  },
+};
+
+// ─── Comunas de Chile ─────────────────────────────────────────
+const COMUNAS = [
+  "Cerro Navia","Santiago Centro","Maipú","La Florida","Pudahuel",
+  "Peñalolén","San Bernardo","El Bosque","Quilicura","Renca",
+  "Conchalí","Recoleta","Independencia","Providencia","Ñuñoa",
+  "Las Condes","Vitacura","Lo Barnechea","Huechuraba","Colina",
+  "Puente Alto","La Pintana","Lo Espejo","Pedro Aguirre Cerda",
+  "Lo Prado","Quinta Normal","Estación Central","Cerrillos",
+  "Padre Hurtado","Peñaflor","Talagante","Melipilla","Buin","Paine",
+  "Valparaíso","Viña del Mar","Concepción","Talcahuano","Temuco",
+  "Antofagasta","La Serena","Coquimbo","Rancagua","Talca","Arica",
+  "Iquique","Puerto Montt","Osorno","Valdivia","Punta Arenas",
 ];
-const COMUNAS = ["Cerro Navia","Santiago","Maipú","La Florida","Pudahuel","Peñalolén","San Bernardo","El Bosque","Quilicura","Renca","Conchalí","Recoleta","Independencia","Providencia","Ñuñoa","Las Condes","Vitacura","Lo Barnechea","Huechuraba","Colina","Lampa","Til Til","Pirque","San José de Maipo","Puente Alto","La Pintana","Lo Espejo","Pedro Aguirre Cerda","Lo Prado","Quinta Normal","Estación Central","Cerrillos","Maipú","Padre Hurtado","Peñaflor","Talagante","El Monte","Isla de Maipo","Melipilla","Calera de Tango","Buin","Paine"];
-const TIPOS_PUNTO = ["Mall / Centro comercial","Calle / Vía pública","Feria libre","Local comercial","Supermercado","Establecimiento educacional","Centro de salud","Otro"];
-const SURVEY = {
-  encuesta_id:"e4b2a1f0-1234-5678-abcd-ef0123456789",
-  titulo:"Estudio de Mercado — Alimento Mixto Mascotas",
-  empresa:"Alimentos del Sur S.A.",
-  preguntas:[
-    {id:1,tipo:"seleccion_unica",enunciado:"¿Tiene mascotas actualmente en su hogar?",opciones:["Sí, solo perro","Sí, solo gato","Sí, ambos","No tengo mascotas"],reglas:{requerido:true,salto_logico:{"No tengo mascotas":"FIN_CON_DESCARTE"}}},
-    {id:2,tipo:"seleccion_multiple",enunciado:"¿Cuál es su mayor complicación diaria al alimentar a sus mascotas?",opciones:["Espacio de almacenamiento","Riesgo de consumo cruzado","Gasto económico alto","Ninguna"],reglas:{max_opciones:2}},
-    {id:3,tipo:"seleccion_unica",enunciado:"¿Qué certificación le daría confianza absoluta para comprar un alimento unificado?",opciones:["Respaldo Asociación Médicos Veterinarios","Estudios clínicos de Taurina/Proteína","Garantía de palatabilidad"],reglas:{requerido:true}},
-  ],
-};
 
-// ─── Colors ───────────────────────────────────────────
-const C = {
-  bg:"#070E1C",surface:"#0B1527",card:"#0F1D35",elevated:"#132240",
-  border:"rgba(6,182,212,0.12)",borderFocus:"rgba(6,182,212,0.5)",
-  primary:"#06B6D4",secondary:"#8B5CF6",
-  success:"#10B981",danger:"#EF4444",warning:"#F59E0B",
-  text:"#F1F5F9",textSec:"#94A3B8",textMuted:"#3D5070",
-  grad:"linear-gradient(135deg,#06B6D4,#8B5CF6)",
-};
+const TIPOS_PUNTO = [
+  "Mall / Centro comercial","Calle / Vía pública","Feria libre",
+  "Local comercial","Supermercado / Hipermercado","Farmacia / Droguería",
+  "Centro de salud / Clínica","Establecimiento educacional",
+  "Mercado / Feria municipal","Plaza / Parque público","Otro",
+];
 
-const checkStrength=(pw)=>{
-  const checks={length:pw.length>=8,upper:/[A-Z]/.test(pw),lower:/[a-z]/.test(pw),number:/[0-9]/.test(pw),special:/[^A-Za-z0-9]/.test(pw)};
-  const score=Object.values(checks).filter(Boolean).length;
-  return{checks,score,label:["","Muy débil","Débil","Regular","Fuerte","Muy fuerte"][score],color:["","#EF4444","#F97316","#EAB308","#22C55E","#10B981"][score]};
-};
+// ─── Primitives ───────────────────────────────────────────────
+const Field = ({ label, children }) => (
+  <div style={{marginBottom:14}}>
+    {label&&<div style={{fontSize:10,fontWeight:700,color:T.textMuted,
+      textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>{label}</div>}
+    {children}
+  </div>
+);
 
-// ─── Primitives ───────────────────────────────────────
-function FieldInput({label,type="text",value,onChange,placeholder,icon:I,rightEl,error,hint}){
-  const[focused,setFocused]=useState(false);
-  return(
-    <div style={{marginBottom:14}}>
-      {label&&<div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>{label}</div>}
-      <div style={{position:"relative"}}>
-        {I&&<I size={14} style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:focused?C.primary:C.textMuted,transition:"color .2s",pointerEvents:"none"}}/>}
-        <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-          onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
-          style={{width:"100%",background:C.elevated,border:`1.5px solid ${error?C.danger:focused?C.borderFocus:C.border}`,borderRadius:11,padding:`11px ${rightEl?"44px":"13px"} 11px ${I?"40px":"13px"}`,color:C.text,fontSize:14,outline:"none",fontFamily:"inherit",transition:"border .2s",boxSizing:"border-box",boxShadow:focused?`0 0 0 3px ${error?C.danger:C.primary}15`:"none"}}/>
-        {rightEl&&<div style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)"}}>{rightEl}</div>}
-      </div>
-      {error&&<div style={{fontSize:11,color:C.danger,marginTop:4,display:"flex",alignItems:"center",gap:3}}><AlertCircle size={10}/>{error}</div>}
-      {hint&&!error&&<div style={{fontSize:11,color:C.textMuted,marginTop:4}}>{hint}</div>}
-    </div>
-  );
-}
+const Input = ({ value, onChange, placeholder, type="text" }) => (
+  <input type={type} value={value} onChange={e=>onChange(e.target.value)}
+    placeholder={placeholder}
+    style={{width:"100%",background:T.elevated,border:`1.5px solid ${T.border}`,
+      borderRadius:11,padding:"11px 13px",color:T.text,fontSize:14,
+      outline:"none",boxSizing:"border-box",fontFamily:"inherit",transition:"border .2s"}}
+    onFocus={e=>e.currentTarget.style.borderColor=T.borderFocus}
+    onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+);
 
-function StrengthBar({password}){
-  if(!password) return null;
-  const{score,label,color,checks}=checkStrength(password);
-  return(
-    <div style={{marginTop:-6,marginBottom:12}}>
-      <div style={{display:"flex",gap:3,marginBottom:5}}>
-        {[1,2,3,4,5].map(i=><div key={i} style={{flex:1,height:3,borderRadius:2,background:i<=score?color:C.border,transition:"background .3s"}}/>)}
-      </div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontSize:10,color:color,fontWeight:700}}>{label}</span>
-        <div style={{display:"flex",gap:6}}>
-          {[["8+",checks.length],["A-Z",checks.upper],["0-9",checks.number],["!@#",checks.special]].map(([l,ok])=>(
-            <span key={l} style={{fontSize:9,color:ok?C.success:C.textMuted,display:"flex",alignItems:"center",gap:2}}>
-              {ok?<Check size={8}/>:<X size={8}/>}{l}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+const Select = ({ value, onChange, options, placeholder="" }) => (
+  <div style={{position:"relative"}}>
+    <select value={value} onChange={e=>onChange(e.target.value)}
+      style={{width:"100%",background:T.elevated,border:`1.5px solid ${T.border}`,
+        borderRadius:11,padding:"11px 36px 11px 13px",color:value?T.text:T.textMuted,
+        fontSize:14,outline:"none",appearance:"none",boxSizing:"border-box",
+        fontFamily:"inherit",transition:"border .2s"}}
+      onFocus={e=>e.currentTarget.style.borderColor=T.borderFocus}
+      onBlur={e=>e.currentTarget.style.borderColor=T.border}>
+      <option value="">{placeholder||"Seleccionar..."}</option>
+      {options.map(o=><option key={o} value={o}>{o}</option>)}
+    </select>
+    <ChevronDown size={13} style={{position:"absolute",right:12,top:"50%",
+      transform:"translateY(-50%)",color:T.textMuted,pointerEvents:"none"}}/>
+  </div>
+);
 
-function Select({label,value,onChange,options,icon:I,error}){
-  const[focused,setFocused]=useState(false);
-  return(
-    <div style={{marginBottom:14}}>
-      {label&&<div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>{label}</div>}
-      <div style={{position:"relative"}}>
-        {I&&<I size={14} style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:focused?C.primary:C.textMuted,pointerEvents:"none"}}/>}
-        <select value={value} onChange={e=>onChange(e.target.value)}
-          onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
-          style={{width:"100%",background:C.elevated,border:`1.5px solid ${error?C.danger:focused?C.borderFocus:C.border}`,borderRadius:11,padding:`11px 40px 11px ${I?"40px":"13px"}`,color:value?C.text:C.textMuted,fontSize:14,outline:"none",fontFamily:"inherit",appearance:"none",boxSizing:"border-box",transition:"border .2s",boxShadow:focused?`0 0 0 3px ${C.primary}15`:"none"}}>
-          <option value="">Seleccionar...</option>
-          {options.map(o=><option key={o} value={o}>{o}</option>)}
-        </select>
-        <ChevronDown size={14} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:C.textMuted,pointerEvents:"none"}}/>
-      </div>
-      {error&&<div style={{fontSize:11,color:C.danger,marginTop:4,display:"flex",alignItems:"center",gap:3}}><AlertCircle size={10}/>{error}</div>}
-    </div>
-  );
-}
-
-function PrimaryBtn({children,onClick,loading,disabled,icon:I,v="primary"}){
-  const bg=v==="success"?`linear-gradient(135deg,#10B981,#059669)`:C.grad;
-  return(
+const PrimaryBtn = ({ children, onClick, loading, disabled, icon:I, v="primary" }) => {
+  const bg = v==="green"?"linear-gradient(135deg,#10B981,#059669)":T.grad;
+  const shadow = v==="green"?"0 4px 16px rgba(16,185,129,0.35)":"0 4px 16px rgba(6,182,212,0.35)";
+  return (
     <button onClick={disabled||loading?undefined:onClick} disabled={disabled||loading}
-      style={{width:"100%",padding:"13px 14px",borderRadius:12,border:"none",background:(disabled||loading)?C.elevated:bg,color:(disabled||loading)?C.textMuted:"#fff",fontSize:14,fontWeight:700,cursor:(disabled||loading)?"not-allowed":"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:7,transition:"all .2s",boxShadow:(disabled||loading)?"none":`0 4px 18px ${v==="success"?"#10B98140":"rgba(6,182,212,0.35)"}`}}>
-      {loading?<><RefreshCw size={14} style={{animation:"spin 1s linear infinite"}}/>Procesando...</>:<>{I&&<I size={14}/>}{children}</>}
+      style={{width:"100%",padding:"14px",borderRadius:13,border:"none",
+        background:(disabled||loading)?T.elevated:bg,
+        color:(disabled||loading)?T.textMuted:"#fff",fontSize:14,fontWeight:700,
+        cursor:(disabled||loading)?"not-allowed":"pointer",fontFamily:"inherit",
+        display:"flex",alignItems:"center",justifyContent:"center",gap:7,
+        transition:"all .2s",
+        boxShadow:(disabled||loading)?"none":shadow}}>
+      {loading
+        ?<><RefreshCw size={14} style={{animation:"spin 1s linear infinite"}}/>Procesando...</>
+        :<>{I&&<I size={14}/>}{children}</>}
     </button>
   );
-}
+};
 
-// ─── Screen 1: Login ──────────────────────────────────
-function LoginScreen({onLogin}){
-  const[email,setEmail]=useState("");
-  const[pass,setPass]=useState("");
-  const[showPass,setShowPass]=useState(false);
-  const[loading,setLoading]=useState(false);
-  const[error,setError]=useState("");
-
-  const handleLogin=()=>{
-    if(!email||!pass){setError("Completa todos los campos");return;}
-    setLoading(true);setError("");
-    setTimeout(()=>{
-      setLoading(false);
-      const user=MOCK_USERS.find(u=>u.email===email);
-      if(!user){setError("Email no registrado en el sistema");return;}
-      const validPass=user.firstLogin?(pass===user.tempPass):(pass===user.pass||pass===user.tempPass);
-      if(!validPass){setError("Contraseña incorrecta");return;}
-      Store.save("enc_session",user);
-      onLogin(user);
-    },1300);
-  };
-
-  return(
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
-      <div style={{width:"100%",maxWidth:380}}>
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:68,height:68,borderRadius:20,background:C.grad,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",boxShadow:"0 8px 28px rgba(6,182,212,0.35)"}}>
-            <Clipboard size={28} color="#fff"/>
-          </div>
-          <div style={{fontSize:22,fontWeight:900,color:C.text,marginBottom:3}}>SurveyAI</div>
-          <div style={{fontSize:12,color:C.textMuted,letterSpacing:".06em"}}>PORTAL ENCUESTADORES</div>
-        </div>
-
-        <div style={{background:C.card,borderRadius:20,padding:26,border:`1px solid ${C.border}`,boxShadow:"0 20px 50px rgba(0,0,0,.5)"}}>
-          <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:4}}>Iniciar sesión</div>
-          <div style={{fontSize:12,color:C.textMuted,marginBottom:20}}>Accede con tus credenciales asignadas por tu empresa</div>
-
-          {error&&<div style={{background:`${C.danger}14`,border:`1px solid ${C.danger}30`,borderRadius:10,padding:"9px 13px",marginBottom:14,fontSize:13,color:C.danger,display:"flex",alignItems:"center",gap:7}}><AlertCircle size={13}/>{error}</div>}
-
-          <FieldInput label="Email" type="email" value={email} onChange={setEmail} placeholder="tu@empresa.cl" icon={Mail}/>
-          <FieldInput label="Contraseña" type={showPass?"text":"password"} value={pass} onChange={setPass} placeholder="Tu contraseña temporal o actual" icon={Lock}
-            rightEl={<div onClick={()=>setShowPass(v=>!v)} style={{cursor:"pointer",color:C.textMuted}}>{showPass?<EyeOff size={14}/>:<Eye size={14}/>}</div>}/>
-
-          <PrimaryBtn onClick={handleLogin} loading={loading} icon={ArrowRight}>Ingresar</PrimaryBtn>
-        </div>
-
-        <div style={{marginTop:16,padding:"10px 14px",background:`${C.warning}10`,borderRadius:12,border:`1px solid ${C.warning}25`}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.warning,marginBottom:4,letterSpacing:".05em"}}>CUENTAS DEMO</div>
-          <div style={{fontSize:11,color:C.textMuted,lineHeight:1.8}}>
-            <span style={{color:C.primary}}>carlos@surveyai.cl</span> / <span style={{color:C.textSec}}>Temp2025!</span> (primer login)<br/>
-            <span style={{color:C.primary}}>ana@surveyai.cl</span> / <span style={{color:C.textSec}}>Ana2025!</span>
-          </div>
-        </div>
+// ─── Offline Banner ───────────────────────────────────────────
+function OfflineBanner({ online, count, onSync, syncing }) {
+  if (online && count===0) return null;
+  return (
+    <div style={{
+      background:online?`${T.cyan}12`:`${T.yellow}12`,
+      borderBottom:`1px solid ${online?T.cyan+"25":T.yellow+"25"}`,
+      padding:"7px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",gap:7}}>
+        {online?<Wifi size={11} color={T.cyan}/>:<WifiOff size={11} color={T.yellow}/>}
+        <span style={{fontSize:11,fontWeight:700,color:online?T.cyan:T.yellow}}>
+          {online?`${count} respuestas pendientes de sincronizar`:`Sin conexión — ${count} en cola local`}
+        </span>
       </div>
+      {online&&count>0&&(
+        <button onClick={onSync} disabled={syncing}
+          style={{display:"flex",alignItems:"center",gap:4,background:T.cyan,
+            border:"none",borderRadius:7,padding:"3px 10px",color:"#fff",
+            fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <Upload size={9}/>{syncing?"...":"Sincronizar"}
+        </button>
+      )}
     </div>
   );
 }
 
-// ─── Screen 2: Change password (first login) ──────────
-function ChangePasswordScreen({user,onDone}){
-  const[newPass,setNewPass]=useState("");
-  const[confirm,setConfirm]=useState("");
-  const[showNew,setShowNew]=useState(false);
-  const[loading,setLoading]=useState(false);
-  const[errors,setErrors]=useState({});
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA 1: JORNADA
+// ═══════════════════════════════════════════════════════════════
+function PantallaJornada({ user, onStart }) {
+  const [comuna, setComuna] = useState("");
+  const [tipoPunto, setTipoPunto] = useState("");
+  const [nombreLocal, setNombreLocal] = useState("");
+  const [gps, setGps] = useState(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+  const now = new Date();
 
-  const handle=()=>{
-    const e={};
-    const{score}=checkStrength(newPass);
-    if(score<3) e.pass="Contraseña demasiado débil";
-    if(newPass!==confirm) e.confirm="Las contraseñas no coinciden";
-    if(newPass===user.tempPass) e.pass="No puedes usar la contraseña temporal";
-    if(Object.keys(e).length){setErrors(e);return;}
-    setLoading(true);
-    setTimeout(()=>{
-      const updated={...user,pass:newPass,firstLogin:false,tempPass:null};
-      Store.save("enc_session",updated);
-      onDone(updated);
-    },1200);
-  };
-
-  return(
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
-      <div style={{width:"100%",maxWidth:380}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{width:60,height:60,borderRadius:18,background:`${C.warning}18`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",border:`1px solid ${C.warning}30`}}>
-            <Key size={24} color={C.warning}/>
-          </div>
-          <div style={{fontSize:18,fontWeight:800,color:C.text,marginBottom:5}}>Cambia tu contraseña</div>
-          <div style={{fontSize:13,color:C.textMuted,lineHeight:1.6}}>Es tu primer acceso. Crea una contraseña personal segura para continuar.</div>
-        </div>
-
-        <div style={{background:C.card,borderRadius:20,padding:26,border:`1px solid ${C.border}`}}>
-          <div style={{padding:"10px 13px",background:`${C.primary}08`,borderRadius:10,border:`1px solid ${C.primary}18`,marginBottom:18,fontSize:12,color:C.textSec}}>
-            <Shield size={12} color={C.primary} style={{display:"inline",marginRight:5}}/>
-            Hola <strong style={{color:C.text}}>{user.name}</strong> · {user.empresa}
-          </div>
-          <FieldInput label="Nueva contraseña" type={showNew?"text":"password"} value={newPass} onChange={setNewPass} placeholder="Mín. 8 caracteres" icon={Lock} error={errors.pass} hint="Usa mayúsculas, números y símbolos"
-            rightEl={<div onClick={()=>setShowNew(v=>!v)} style={{cursor:"pointer",color:C.textMuted}}>{showNew?<EyeOff size={14}/>:<Eye size={14}/>}</div>}/>
-          <StrengthBar password={newPass}/>
-          <FieldInput label="Confirmar contraseña" type="password" value={confirm} onChange={setConfirm} placeholder="Repite tu contraseña" icon={Lock} error={errors.confirm}/>
-          <PrimaryBtn onClick={handle} loading={loading} icon={Check}>Establecer contraseña</PrimaryBtn>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Screen 3: Jornada ────────────────────────────────
-function JornadaScreen({user,onStart}){
-  const[comuna,setComuna]=useState("");
-  const[tipoPunto,setTipoPunto]=useState("");
-  const[nombreLocal,setNombreLocal]=useState("");
-  const[gps,setGps]=useState(null);
-  const[gpsLoading,setGpsLoading]=useState(false);
-  const[errors,setErrors]=useState({});
-  const now=new Date();
-  const fecha=now.toLocaleDateString("es-CL",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
-  const hora=now.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});
-
-  const getGPS=()=>{
+  const getGPS = useCallback(() => {
     setGpsLoading(true);
-    if(navigator.geolocation){
+    if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        pos=>{ setGps({lat:pos.coords.latitude.toFixed(6),lng:pos.coords.longitude.toFixed(6),acc:Math.round(pos.coords.accuracy)}); setGpsLoading(false); },
-        ()=>{ setGps({lat:"-33.4489",lng:"-70.6693",acc:50,simulated:true}); setGpsLoading(false); }
+        pos => {
+          setGps({
+            lat: pos.coords.latitude.toFixed(6),
+            lng: pos.coords.longitude.toFixed(6),
+            acc: Math.round(pos.coords.accuracy),
+            ts: new Date().toISOString(),
+          });
+          setGpsLoading(false);
+        },
+        () => {
+          setGps({ lat:"-33.4489", lng:"-70.6693", acc:999, simulated:true, ts:new Date().toISOString() });
+          setGpsLoading(false);
+        },
+        { timeout:8000, enableHighAccuracy:true }
       );
-    } else { setGps({lat:"-33.4489",lng:"-70.6693",acc:50,simulated:true}); setGpsLoading(false); }
-  };
-
-  useEffect(()=>{ getGPS(); },[]);
-
-  const handle=()=>{
-    const e={};
-    if(!comuna) e.comuna="Selecciona una comuna";
-    if(!tipoPunto) e.tipoPunto="Selecciona el tipo de punto";
-    if(Object.keys(e).length){setErrors(e);return;}
-    onStart({comuna,tipoPunto,nombreLocal,gps,fecha,hora,inicio:new Date().toISOString()});
-  };
-
-  return(
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
-      <div style={{width:"100%",maxWidth:400}}>
-        <div style={{textAlign:"center",marginBottom:24}}>
-          <div style={{width:60,height:60,borderRadius:18,background:`${C.success}18`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",border:`1px solid ${C.success}30`}}>
-            <MapPin size={24} color={C.success}/>
-          </div>
-          <div style={{fontSize:18,fontWeight:800,color:C.text,marginBottom:3}}>Declarar jornada</div>
-          <div style={{fontSize:12,color:C.textMuted}}>¿Dónde trabajarás hoy?</div>
-        </div>
-
-        <div style={{background:C.card,borderRadius:20,padding:24,border:`1px solid ${C.border}`,marginBottom:14}}>
-          {/* Fecha y hora automática */}
-          <div style={{display:"flex",gap:10,marginBottom:18}}>
-            <div style={{flex:1,background:C.elevated,borderRadius:10,padding:"10px 13px",border:`1px solid ${C.border}`}}>
-              <div style={{fontSize:9,color:C.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Fecha</div>
-              <div style={{fontSize:12,color:C.text,fontWeight:600,textTransform:"capitalize"}}>{fecha}</div>
-            </div>
-            <div style={{width:80,background:C.elevated,borderRadius:10,padding:"10px 13px",border:`1px solid ${C.border}`}}>
-              <div style={{fontSize:9,color:C.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Hora</div>
-              <div style={{fontSize:14,color:C.primary,fontWeight:800}}>{hora}</div>
-            </div>
-          </div>
-
-          <Select label="Comuna *" value={comuna} onChange={setComuna} options={COMUNAS} icon={MapPin} error={errors.comuna}/>
-          <Select label="Tipo de punto *" value={tipoPunto} onChange={setTipoPunto} options={TIPOS_PUNTO} icon={Building} error={errors.tipoPunto}/>
-          <FieldInput label="Nombre del local (opcional)" value={nombreLocal} onChange={setNombreLocal} placeholder="Ej: Jumbo Apoquindo, Feria San Miguel..." icon={Building}/>
-
-          {/* GPS */}
-          <div style={{background:C.elevated,borderRadius:10,padding:"11px 13px",border:`1px solid ${gps?C.success+"30":C.border}`,marginBottom:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{display:"flex",alignItems:"center",gap:7}}>
-                <MapPin size={13} color={gps?C.success:C.textMuted}/>
-                <span style={{fontSize:12,color:gps?C.success:C.textMuted,fontWeight:600}}>
-                  {gpsLoading?"Obteniendo ubicación...":gps?`GPS: ${gps.lat}, ${gps.lng} (±${gps.acc}m)${gps.simulated?" (simulado)":""}`:("Sin GPS")}
-                </span>
-              </div>
-              {!gpsLoading&&<div onClick={getGPS} style={{cursor:"pointer",color:C.primary}}><RefreshCw size={12}/></div>}
-            </div>
-          </div>
-
-          <PrimaryBtn onClick={handle} icon={ArrowRight} v="success">Comenzar jornada</PrimaryBtn>
-        </div>
-
-        <div style={{textAlign:"center",fontSize:11,color:C.textMuted}}>
-          Encuestador: <strong style={{color:C.textSec}}>{user.name}</strong> · {user.empresa}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Offline Banner ───────────────────────────────────
-function OfflineBanner({online,count,onSync,syncing}){
-  return !online?(
-    <div style={{background:`${C.warning}18`,borderBottom:`1px solid ${C.warning}30`,padding:"7px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-      <div style={{display:"flex",alignItems:"center",gap:7}}><WifiOff size={12} color={C.warning}/><span style={{fontSize:11,color:C.warning,fontWeight:600}}>Sin conexión — {count} en cola</span></div>
-    </div>
-  ):count>0?(
-    <div style={{background:`${C.primary}12`,borderBottom:`1px solid ${C.primary}25`,padding:"7px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-      <div style={{display:"flex",alignItems:"center",gap:7}}><Wifi size={12} color={C.primary}/><span style={{fontSize:11,color:C.primary,fontWeight:600}}>{count} pendientes por sincronizar</span></div>
-      <button onClick={onSync} disabled={syncing} style={{display:"flex",alignItems:"center",gap:4,background:C.primary,border:"none",borderRadius:7,padding:"3px 10px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-        <Upload size={9}/>{syncing?"...":"Sync"}
-      </button>
-    </div>
-  ):null;
-}
-
-// ─── Survey Form ──────────────────────────────────────
-function SurveyForm({survey,user,jornada,online,onComplete,onDiscard}){
-  const init=()=>{const s={};survey.preguntas.forEach(p=>{s[p.id]=p.tipo==="seleccion_multiple"?[]:""});return s;};
-  const[resp,setResp]=useState(init());
-  const[step,setStep]=useState(0);
-  const[discarded,setDiscarded]=useState(null);
-  const[errors,setErrors]=useState({});
-  const[sending,setSending]=useState(false);
-  const[success,setSuccess]=useState(false);
-  const current=survey.preguntas[step];
-  const total=survey.preguntas.length;
-
-  const handleChange=useCallback((pid,val,tipo)=>{
-    if(tipo==="seleccion_unica"){
-      const newR={...resp,[pid]:val};
-      setResp(newR);
-      setErrors(e=>({...e,[pid]:undefined}));
-      const p=survey.preguntas.find(p=>p.id===pid);
-      if(p?.reglas?.salto_logico?.[val]==="FIN_CON_DESCARTE"){
-        setDiscarded({opcion:val,pregunta_id:pid});
-        const discPayload={encuesta_id:survey.encuesta_id,encuestador_id:user.id,es_descarte:true,pregunta_descarte_id:pid,jornada,respuestas:{[pid]:val}};
-        if(navigator.onLine){guardarRespuesta(discPayload).catch(()=>Store.queue.add(discPayload));}
-        else{Store.queue.add(discPayload);}
-        setTimeout(()=>onDiscard(),2500);
-      }
-    } else if(tipo==="seleccion_multiple"){
-      const curr=Array.isArray(resp[pid])?resp[pid]:[];
-      const already=curr.includes(val);
-      const next=already?curr.filter(v=>v!==val):[...curr,val];
-      const p=survey.preguntas.find(p=>p.id===pid);
-      const max=p?.reglas?.max_opciones;
-      if(max&&next.length>max) return;
-      setResp(r=>({...r,[pid]:next}));
+    } else {
+      setGps({ lat:"-33.4489", lng:"-70.6693", acc:999, simulated:true, ts:new Date().toISOString() });
+      setGpsLoading(false);
     }
-  },[resp,survey,user,jornada,onDiscard]);
+  }, []);
 
-  const handleSubmit=async()=>{
-    const errs={};
-    survey.preguntas.forEach(p=>{if(!p.reglas?.requerido)return;const v=resp[p.id];if(p.tipo==="seleccion_multiple"?v.length===0:v==="")errs[p.id]="Obligatorio";});
-    if(Object.keys(errs).length){setErrors(errs);return;}
-    setSending(true);
-    const payload={encuesta_id:survey.encuesta_id,encuestador_id:user.id,es_descarte:false,jornada,respuestas:resp};
-    if(online){
-      try{
-        await guardarRespuesta(payload);
-        setSending(false);setSuccess(true);setTimeout(()=>onComplete(false),2000);
-      } catch {
-        Store.queue.add(payload);setSending(false);onComplete(true);
-      }
-    } else {Store.queue.add(payload);setSending(false);onComplete(true);}
+  useEffect(() => { getGPS(); }, []);
+
+  const iniciar = () => {
+    const e = {};
+    if (!comuna) e.comuna = "Selecciona una comuna";
+    if (!tipoPunto) e.tipoPunto = "Selecciona el tipo de punto";
+    if (Object.keys(e).length) { setErrors(e); return; }
+    const jornada = {
+      comuna, tipoPunto, nombreLocal, gps,
+      fecha: now.toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"}),
+      hora: now.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}),
+      inicio: now.toISOString(),
+    };
+    try { localStorage.setItem("sai_jornada",JSON.stringify(jornada)); } catch {}
+    onStart(jornada);
   };
 
-  if(discarded) return(
-    <div style={{minHeight:"60vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
-      <div style={{width:60,height:60,borderRadius:16,background:`${C.warning}18`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}><AlertCircle size={26} color={C.warning}/></div>
-      <div style={{fontSize:17,fontWeight:800,color:C.text,marginBottom:6}}>Encuesta descartada</div>
-      <div style={{fontSize:13,color:C.textSec,marginBottom:8}}>"{discarded.opcion}"</div>
-      <div style={{fontSize:11,color:C.textMuted,background:C.elevated,borderRadius:9,padding:"7px 13px",fontFamily:"monospace",border:`1px solid ${C.border}`,marginBottom:14}}>FIN_CON_DESCARTE → {online?"Enviado":"Guardado offline"}</div>
-      <div style={{fontSize:12,color:C.success,background:`${C.success}18`,padding:"8px 18px",borderRadius:10,fontWeight:700}}>✓ {online?"Registrado":"En cola"}</div>
-    </div>
-  );
+  return (
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+        input,button,select{font-family:inherit}
+        @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+      `}</style>
 
-  if(success) return(
-    <div style={{minHeight:"60vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
-      <div style={{width:68,height:68,borderRadius:18,background:`${C.success}18`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}><CheckCircle size={30} color={C.success}/></div>
-      <div style={{fontSize:19,fontWeight:800,color:C.text,marginBottom:6}}>¡Enviada!</div>
-      <div style={{fontSize:13,color:C.textSec}}>Respuestas guardadas correctamente</div>
-    </div>
-  );
+      <div style={{width:"100%",maxWidth:420}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:56,height:56,borderRadius:16,
+            background:`${T.green}15`,border:`1px solid ${T.green}30`,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            margin:"0 auto 12px"}}>
+            <MapPin size={22} color={T.green}/>
+          </div>
+          <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:3}}>
+            Declarar jornada
+          </div>
+          <div style={{fontSize:12,color:T.textMuted}}>
+            {user?.nombre||"Encuestador"} · {user?.empresa||""}
+          </div>
+        </div>
 
-  return(
-    <div>
-      <div style={{height:3,background:C.surface}}><div style={{height:"100%",width:`${(step/total)*100}%`,background:C.grad,transition:"width .4s"}}/></div>
-      <div style={{padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${C.border}`}}>
-        <span style={{fontSize:11,color:C.textMuted}}>P{step+1}/{total}</span>
-        <div style={{display:"flex",gap:4}}>
-          {survey.preguntas.map((_,i)=><div key={i} style={{width:i===step?18:5,height:5,borderRadius:3,background:i<step?C.success:i===step?C.primary:C.border,transition:"all .3s"}}/>)}
+        <div style={{background:T.card,borderRadius:18,padding:22,
+          border:`1px solid ${T.border}`,marginBottom:14}}>
+
+          {/* Fecha y hora automática */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,marginBottom:18}}>
+            <div style={{background:T.elevated,borderRadius:10,padding:"10px 13px",
+              border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,
+                textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Fecha</div>
+              <div style={{fontSize:12,fontWeight:600,color:T.text,textTransform:"capitalize"}}>
+                {now.toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"})}
+              </div>
+            </div>
+            <div style={{background:T.elevated,borderRadius:10,padding:"10px 13px",
+              border:`1px solid ${T.border}`,minWidth:70}}>
+              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,
+                textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Hora</div>
+              <div style={{fontSize:15,fontWeight:900,color:T.cyan,fontFamily:"monospace"}}>
+                {now.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}
+              </div>
+            </div>
+          </div>
+
+          <Field label="Comuna *">
+            <Select value={comuna} onChange={v=>{setComuna(v);setErrors(e=>({...e,comuna:undefined}));}}
+              options={COMUNAS} placeholder="Selecciona tu comuna"/>
+            {errors.comuna&&<div style={{fontSize:11,color:T.red,marginTop:4}}>{errors.comuna}</div>}
+          </Field>
+
+          <Field label="Tipo de punto *">
+            <Select value={tipoPunto} onChange={v=>{setTipoPunto(v);setErrors(e=>({...e,tipoPunto:undefined}));}}
+              options={TIPOS_PUNTO} placeholder="¿Dónde estás trabajando?"/>
+            {errors.tipoPunto&&<div style={{fontSize:11,color:T.red,marginTop:4}}>{errors.tipoPunto}</div>}
+          </Field>
+
+          <Field label="Nombre del local (opcional)">
+            <Input value={nombreLocal} onChange={setNombreLocal}
+              placeholder="Ej: Jumbo Apoquindo, Feria Lo Valledor..."/>
+          </Field>
+
+          {/* GPS Status */}
+          <div style={{padding:"10px 13px",borderRadius:10,marginBottom:16,
+            background:gps?`${T.green}08`:`${T.yellow}08`,
+            border:`1px solid ${gps?T.green+"25":T.yellow+"25"}`,
+            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:7}}>
+              <MapPin size={12} color={gps?T.green:T.yellow}/>
+              <span style={{fontSize:11,color:gps?T.green:T.yellow,fontWeight:600}}>
+                {gpsLoading?"Obteniendo GPS..."
+                  :gps?`GPS: ${gps.lat}, ${gps.lng} (±${gps.acc}m${gps.simulated?" sim":""})`
+                  :"Sin GPS"}
+              </span>
+            </div>
+            {!gpsLoading&&<div onClick={getGPS} style={{cursor:"pointer",color:T.textMuted}}>
+              <RefreshCw size={11}/>
+            </div>}
+          </div>
+
+          <PrimaryBtn v="green" icon={ArrowRight} onClick={iniciar}>
+            Comenzar jornada
+          </PrimaryBtn>
         </div>
       </div>
-      <div style={{padding:18}}>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
-          <span style={{fontSize:9,fontWeight:700,color:C.primary,background:`${C.primary}18`,padding:"2px 8px",borderRadius:20}}>P{step+1}</span>
-          {current?.reglas?.requerido&&<span style={{fontSize:9,color:C.danger,background:`${C.danger}15`,padding:"2px 7px",borderRadius:20,fontWeight:700}}>OBLIGATORIA</span>}
-          {current?.reglas?.max_opciones&&<span style={{fontSize:9,color:C.warning,background:`${C.warning}15`,padding:"2px 7px",borderRadius:20,fontWeight:700}}>MÁX {current.reglas.max_opciones}</span>}
-          {current?.reglas?.salto_logico&&<span style={{fontSize:9,color:C.textMuted,background:C.elevated,padding:"2px 7px",borderRadius:20,fontWeight:700,border:`1px solid ${C.border}`}}>⚡ Salto</span>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA 2: FICHA DEL ENTREVISTADO
+// ═══════════════════════════════════════════════════════════════
+function PantallaFicha({ jornada, onContinuar, onCancelar }) {
+  const [ficha, setFicha] = useState({
+    nombre_anonimo: "",
+    edad_rango: "",
+    genero: "",
+    tipo_local: "",
+  });
+
+  const set = (k,v) => setFicha(f=>({...f,[k]:v}));
+
+  return (
+    <div style={{flex:1,overflowY:"auto",padding:20}}>
+      <div style={{maxWidth:420,margin:"0 auto"}}>
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:3}}>
+            Ficha del entrevistado
+          </div>
+          <div style={{fontSize:11,color:T.textMuted}}>
+            {jornada.comuna} · {jornada.tipoPunto}
+          </div>
         </div>
-        <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:18,lineHeight:1.5}}>{current?.enunciado}</div>
-        <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:20}}>
-          {current?.opciones.map((opt,oi)=>{
-            const isMulti=current.tipo==="seleccion_multiple";
-            const selected=isMulti?(resp[current.id]||[]).includes(opt):resp[current.id]===opt;
-            const hasJump=current.reglas?.salto_logico?.[opt];
-            return(
-              <div key={oi} onClick={()=>handleChange(current.id,opt,current.tipo)}
-                style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",borderRadius:13,cursor:"pointer",transition:"all .15s",background:selected?`${C.primary}18`:C.surface,border:`2px solid ${selected?C.primary:C.border}`,boxShadow:selected?`0 0 0 3px ${C.primary}12`:"none"}}>
-                <div style={{width:20,height:20,borderRadius:isMulti?5:"50%",border:`2px solid ${selected?C.primary:C.textMuted}`,background:selected?C.primary:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-                  {selected&&<Check size={11} color="#fff"/>}
+
+        <div style={{background:T.card,borderRadius:16,padding:20,
+          border:`1px solid ${T.border}`,marginBottom:14}}>
+
+          <Field label="Nombre / Alias (opcional)">
+            <Input value={ficha.nombre_anonimo} onChange={v=>set("nombre_anonimo",v)}
+              placeholder="Anónimo si prefiere no decir"/>
+          </Field>
+
+          <Field label="Rango de edad">
+            <Select value={ficha.edad_rango} onChange={v=>set("edad_rango",v)}
+              options={["18-24","25-34","35-44","45-54","55-64","65+"]}/>
+          </Field>
+
+          <Field label="Género">
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {["Masculino","Femenino","Otro"].map(g=>(
+                <div key={g} onClick={()=>set("genero",g)}
+                  style={{padding:"10px",borderRadius:10,cursor:"pointer",textAlign:"center",
+                    fontSize:12,fontWeight:600,transition:"all .15s",
+                    background:ficha.genero===g?`${T.cyan}15`:T.elevated,
+                    color:ficha.genero===g?T.cyan:T.textSec,
+                    border:`1.5px solid ${ficha.genero===g?T.cyan:T.border}`}}>
+                  {g}
                 </div>
-                <span style={{fontSize:13,color:C.text,flex:1,lineHeight:1.4}}>{opt}</span>
-                {hasJump&&<span style={{fontSize:9,color:C.danger,fontWeight:700,background:`${C.danger}15`,padding:"2px 6px",borderRadius:20}}>DESCARTE</span>}
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          </Field>
+
+          <Field label="Tipo de establecimiento">
+            <Select value={ficha.tipo_local} onChange={v=>set("tipo_local",v)}
+              options={["Almacén/Minimarket","Supermercado","Mall","Feria","Calle","Otro"]}/>
+          </Field>
         </div>
-        {errors[current?.id]&&<div style={{fontSize:11,color:C.danger,marginBottom:10,display:"flex",alignItems:"center",gap:5}}><AlertCircle size={11}/>{errors[current.id]}</div>}
+
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onCancelar}
+            style={{flex:1,padding:"12px",borderRadius:12,border:`1px solid ${T.border}`,
+              background:T.elevated,color:T.textSec,fontSize:13,fontWeight:600,
+              cursor:"pointer",fontFamily:"inherit"}}>
+            Cancelar
+          </button>
+          <button onClick={()=>onContinuar(ficha)}
+            style={{flex:2,padding:"12px",borderRadius:12,border:"none",
+              background:T.grad,color:"#fff",fontSize:13,fontWeight:700,
+              cursor:"pointer",fontFamily:"inherit",display:"flex",
+              alignItems:"center",justifyContent:"center",gap:6,
+              boxShadow:"0 4px 14px rgba(6,182,212,0.3)"}}>
+            Iniciar encuesta <ArrowRight size={14}/>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA 3: ENCUESTA CONVERSACIONAL
+// ═══════════════════════════════════════════════════════════════
+function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, onDiscard }) {
+  const initResp = () => {
+    const s = {};
+    survey.sesiones?.forEach(ses => ses.preguntas?.forEach(p => {
+      s[`${ses.sesion}_${p.id}`] = p.tipo==="seleccion_multiple"?[]:""
+    }));
+    return s;
+  };
+
+  const allPreguntas = survey.sesiones?.flatMap(s =>
+    s.preguntas?.map(p => ({...p, sesion_id:s.sesion, sesion_nombre:s.nombre}))
+  ) || [];
+
+  const [resp, setResp] = useState(initResp());
+  const [step, setStep] = useState(0);
+  const [discarded, setDiscarded] = useState(null);
+  const [errors, setErrors] = useState({});
+  const [sending, setSending] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const current = allPreguntas[step];
+  const total = allPreguntas.length;
+  const progress = total > 0 ? ((step) / total) * 100 : 0;
+  const currentKey = current ? `${current.sesion_id}_${current.id}` : null;
+
+  const handleChange = useCallback((key, val, tipo) => {
+    if (tipo==="seleccion_unica") {
+      setResp(r=>({...r,[key]:val}));
+      setErrors(e=>({...e,[key]:undefined}));
+      const p = allPreguntas.find(p=>`${p.sesion_id}_${p.id}`===key);
+      if (p?.reglas?.salto_logico?.[val]==="FIN_CON_DESCARTE") {
+        const payload = {
+          encuesta_id: survey.encuesta_id,
+          encuestador_id: user?.id||"enc-demo",
+          es_descarte: true,
+          pregunta_descarte_id: p.id,
+          jornada, ficha,
+          respuestas: {...resp,[key]:val},
+        };
+        if (online) { guardarRespuesta(payload).catch(()=>Q.add(payload)); }
+        else { Q.add(payload); }
+        Stats.update(true);
+        setDiscarded({ opcion:val, pregunta_id:p.id });
+        setTimeout(()=>onDiscard(), 2800);
+      }
+    } else if (tipo==="seleccion_multiple") {
+      setResp(r => {
+        const curr = Array.isArray(r[key])?r[key]:[];
+        const already = curr.includes(val);
+        const next = already?curr.filter(v=>v!==val):[...curr,val];
+        const p = allPreguntas.find(p=>`${p.sesion_id}_${p.id}`===key);
+        const max = p?.reglas?.max_opciones;
+        if (max&&next.length>max) return r;
+        return {...r,[key]:next};
+      });
+    }
+  }, [resp, allPreguntas, online, jornada, ficha, user, survey]);
+
+  const canAdvance = () => {
+    if (!current) return false;
+    if (current.reglas?.requerido) {
+      const val = resp[currentKey];
+      return Array.isArray(val)?val.length>0:val!=="";
+    }
+    return true;
+  };
+
+  const handleSubmit = async () => {
+    const errs = {};
+    allPreguntas.forEach(p => {
+      if (!p.reglas?.requerido) return;
+      const key = `${p.sesion_id}_${p.id}`;
+      const val = resp[key];
+      if (Array.isArray(val)?val.length===0:val==="") errs[key]="Obligatorio";
+    });
+    if (Object.keys(errs).length) { setErrors(errs); return; }
+
+    setSending(true);
+    const payload = {
+      encuesta_id: survey.encuesta_id,
+      encuestador_id: user?.id||"enc-demo",
+      es_descarte: false,
+      jornada, ficha, respuestas: resp,
+    };
+    if (online) {
+      try { await guardarRespuesta(payload); Stats.update(false); setSending(false); setSuccess(true); setTimeout(()=>onComplete(false),2200); }
+      catch { Q.add(payload); Stats.update(false); setSending(false); onComplete(true); }
+    } else {
+      Q.add(payload); Stats.update(false); setSending(false); onComplete(true);
+    }
+  };
+
+  // ── Discard screen ──
+  if (discarded) return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
+      justifyContent:"center",padding:24,textAlign:"center"}}>
+      <div style={{width:60,height:60,borderRadius:16,background:`${T.yellow}15`,
+        display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}>
+        <AlertCircle size={24} color={T.yellow}/>
+      </div>
+      <div style={{fontSize:17,fontWeight:800,color:T.text,marginBottom:6}}>Encuesta descartada</div>
+      <div style={{fontSize:13,color:T.textSec,marginBottom:10}}>"{discarded.opcion}"</div>
+      <div style={{fontSize:11,color:T.textMuted,background:T.elevated,borderRadius:9,
+        padding:"7px 13px",fontFamily:"monospace",border:`1px solid ${T.border}`,marginBottom:16}}>
+        FIN_CON_DESCARTE → {online?"Registrado":"Cola offline"}
+      </div>
+      <div style={{fontSize:13,color:T.green,background:`${T.green}12`,
+        padding:"8px 18px",borderRadius:10,fontWeight:700}}>
+        ✓ {online?"Guardado en Firebase":"Guardado localmente"}
+      </div>
+    </div>
+  );
+
+  // ── Success screen ──
+  if (success) return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
+      justifyContent:"center",padding:24,textAlign:"center"}}>
+      <div style={{width:68,height:68,borderRadius:18,background:`${T.green}15`,
+        display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
+        <CheckCircle size={30} color={T.green}/>
+      </div>
+      <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:6}}>¡Encuesta enviada!</div>
+      <div style={{fontSize:13,color:T.textSec}}>Respuestas guardadas en Firebase</div>
+    </div>
+  );
+
+  // Detect sesion change for visual separator
+  const prevSesion = step>0?allPreguntas[step-1]?.sesion_id:null;
+  const newSesion = current?.sesion_id !== prevSesion;
+
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+      {/* Progress bar */}
+      <div style={{height:3,background:T.surface}}>
+        <div style={{height:"100%",width:`${progress}%`,background:T.grad,transition:"width .4s"}}/>
+      </div>
+
+      {/* Session + question counter */}
+      <div style={{padding:"10px 18px",display:"flex",justifyContent:"space-between",
+        alignItems:"center",borderBottom:`1px solid ${T.border}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:10,fontWeight:700,color:T.cyan,
+            background:`${T.cyan}15`,padding:"2px 8px",borderRadius:20}}>
+            Sesión {current?.sesion_id}/{survey.sesiones?.length||1}
+          </span>
+          {newSesion&&step>0&&(
+            <span style={{fontSize:10,color:T.violet,background:`${T.violet}12`,
+              padding:"2px 8px",borderRadius:20,fontWeight:700}}>Nueva sesión</span>
+          )}
+        </div>
+        <span style={{fontSize:11,color:T.textMuted}}>P{step+1}/{total}</span>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:18}}>
+        {/* Tags */}
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
+          {current?.reglas?.requerido&&(
+            <span style={{fontSize:9,color:T.red,background:`${T.red}12`,
+              padding:"2px 7px",borderRadius:20,fontWeight:700}}>OBLIGATORIA</span>
+          )}
+          {current?.metodologia&&(
+            <span style={{fontSize:9,color:T.violet,background:`${T.violet}12`,
+              padding:"2px 7px",borderRadius:20,fontWeight:700}}>
+              {current.metodologia}
+            </span>
+          )}
+          {current?.reglas?.max_opciones&&(
+            <span style={{fontSize:9,color:T.yellow,background:`${T.yellow}12`,
+              padding:"2px 7px",borderRadius:20,fontWeight:700}}>
+              MÁX {current.reglas.max_opciones}
+            </span>
+          )}
+          {current?.tiempo_max_ms&&(
+            <span style={{fontSize:9,color:T.cyan,background:`${T.cyan}10`,
+              padding:"2px 7px",borderRadius:20,fontWeight:700,
+              display:"flex",alignItems:"center",gap:3}}>
+              <Clock size={8}/> Responde rápido
+            </span>
+          )}
+          {current?.reglas?.salto_logico&&(
+            <span style={{fontSize:9,color:T.textMuted,background:T.elevated,
+              padding:"2px 7px",borderRadius:20,fontWeight:700,
+              border:`1px solid ${T.border}`}}>⚡ Filtro activo</span>
+          )}
+        </div>
+
+        {/* Question */}
+        <div style={{fontSize:16,fontWeight:700,color:T.text,
+          marginBottom:20,lineHeight:1.55}}>
+          {current?.enunciado}
+        </div>
+
+        {/* Conjoint special layout */}
+        {current?.tipo==="conjoint"&&current?.opciones_conjoint?(
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+            {current.opciones_conjoint.map((opt,oi)=>{
+              const selected = resp[currentKey]===`opcion_${oi+1}`;
+              return (
+                <div key={oi} onClick={()=>handleChange(currentKey,`opcion_${oi+1}`,"seleccion_unica")}
+                  style={{padding:"14px 16px",borderRadius:13,cursor:"pointer",transition:"all .2s",
+                    background:selected?`${T.cyan}12`:T.elevated,
+                    border:`2px solid ${selected?T.cyan:T.border}`,
+                    boxShadow:selected?`0 0 0 3px ${T.cyan}10`:"none"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:selected?T.cyan:T.textMuted,
+                    marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
+                    Opción {String.fromCharCode(64+oi+1)}
+                  </div>
+                  {typeof opt === "object" ? (
+                    Object.entries(opt).map(([k,v])=>(
+                      <div key={k} style={{display:"flex",justifyContent:"space-between",
+                        fontSize:12,marginBottom:3}}>
+                        <span style={{color:T.textSec}}>{k}</span>
+                        <span style={{color:T.text,fontWeight:600}}>{v}</span>
+                      </div>
+                    ))
+                  ):(
+                    <div style={{fontSize:13,color:T.text}}>{opt}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ):(
+          /* Standard options */
+          <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:20}}>
+            {current?.opciones?.map((opt,oi)=>{
+              const isMulti = current.tipo==="seleccion_multiple";
+              const val = resp[currentKey]||[];
+              const selected = isMulti?val.includes(opt):val===opt;
+              const hasJump = current.reglas?.salto_logico?.[opt];
+              return (
+                <div key={oi}
+                  onClick={()=>handleChange(currentKey,opt,current.tipo)}
+                  style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",
+                    borderRadius:13,cursor:"pointer",transition:"all .15s",
+                    background:selected?`${T.cyan}12`:T.elevated,
+                    border:`2px solid ${selected?T.cyan:T.border}`,
+                    boxShadow:selected?`0 0 0 3px ${T.cyan}08`:"none"}}>
+                  <div style={{width:20,height:20,borderRadius:isMulti?5:"50%",
+                    border:`2px solid ${selected?T.cyan:T.textMuted}`,
+                    background:selected?T.cyan:"transparent",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    flexShrink:0,transition:"all .15s"}}>
+                    {selected&&<Check size={11} color="#fff"/>}
+                  </div>
+                  <span style={{fontSize:13,color:T.text,flex:1,lineHeight:1.4}}>{opt}</span>
+                  {hasJump&&(
+                    <span style={{fontSize:9,color:T.red,fontWeight:700,
+                      background:`${T.red}12`,padding:"2px 7px",borderRadius:20}}>
+                      FILTRO
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {errors[currentKey]&&(
+          <div style={{fontSize:11,color:T.red,marginBottom:12,
+            display:"flex",alignItems:"center",gap:5}}>
+            <AlertCircle size={11}/>{errors[currentKey]}
+          </div>
+        )}
+
+        {/* Navigation */}
         <div style={{display:"flex",gap:9}}>
           {step>0&&(
-            <button onClick={()=>setStep(s=>s-1)} style={{flex:1,padding:"13px",borderRadius:12,border:`1px solid ${C.border}`,background:C.surface,color:C.textSec,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+            <button onClick={()=>setStep(s=>s-1)}
+              style={{flex:1,padding:"13px",borderRadius:12,
+                border:`1px solid ${T.border}`,background:T.elevated,
+                color:T.textSec,fontSize:13,fontWeight:600,cursor:"pointer",
+                fontFamily:"inherit",display:"flex",alignItems:"center",
+                justifyContent:"center",gap:5}}>
               <ArrowLeft size={14}/>Anterior
             </button>
           )}
           {step<total-1?(
-            <button onClick={()=>{const req=current?.reglas?.requerido;const val=resp[current?.id];const empty=Array.isArray(val)?val.length===0:val==="";if(req&&empty)return;setStep(s=>s+1);}}
-              style={{flex:2,padding:"13px",borderRadius:12,border:"none",background:C.grad,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:5,boxShadow:`0 4px 14px rgba(6,182,212,0.3)`}}>
+            <button onClick={()=>{if(canAdvance())setStep(s=>s+1);}}
+              disabled={!canAdvance()}
+              style={{flex:2,padding:"13px",borderRadius:12,border:"none",
+                background:canAdvance()?T.grad:T.elevated,
+                color:canAdvance()?"#fff":T.textMuted,fontSize:13,fontWeight:700,
+                cursor:canAdvance()?"pointer":"not-allowed",fontFamily:"inherit",
+                display:"flex",alignItems:"center",justifyContent:"center",gap:5,
+                boxShadow:canAdvance()?"0 4px 14px rgba(6,182,212,0.3)":"none",
+                transition:"all .15s"}}>
               Siguiente<ArrowRight size={14}/>
             </button>
           ):(
             <button onClick={handleSubmit} disabled={sending}
-              style={{flex:2,padding:"13px",borderRadius:12,border:"none",background:sending?C.elevated:"linear-gradient(135deg,#10B981,#059669)",color:sending?C.textMuted:"#fff",fontSize:13,fontWeight:700,cursor:sending?"not-allowed":"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:5,boxShadow:sending?"none":"0 4px 14px rgba(16,185,129,0.3)",transition:"all .15s"}}>
-              {sending?<><RefreshCw size={13} style={{animation:"spin 1s linear infinite"}}/>Enviando...</>:<><Send size={13}/>Enviar</>}
+              style={{flex:2,padding:"13px",borderRadius:12,border:"none",
+                background:sending?T.elevated:"linear-gradient(135deg,#10B981,#059669)",
+                color:sending?T.textMuted:"#fff",fontSize:13,fontWeight:700,
+                cursor:sending?"not-allowed":"pointer",fontFamily:"inherit",
+                display:"flex",alignItems:"center",justifyContent:"center",gap:5,
+                boxShadow:sending?"none":"0 4px 14px rgba(16,185,129,0.3)",
+                transition:"all .15s"}}>
+              {sending
+                ?<><RefreshCw size={13} style={{animation:"spin 1s linear infinite"}}/>Enviando...</>
+                :<><Send size={13}/>Enviar</>}
             </button>
           )}
         </div>
@@ -461,139 +700,252 @@ function SurveyForm({survey,user,jornada,online,onComplete,onDiscard}){
   );
 }
 
-// ─── Home Screen ──────────────────────────────────────
-function HomeScreen({user,jornada,onStart,pendingCount,stats,onEndJornada}){
-  const surveys=[{...SURVEY,completed:stats.today}];
-  return(
-    <div style={{padding:18}}>
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA 4: HOME (lista de encuestas asignadas)
+// ═══════════════════════════════════════════════════════════════
+function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEncuesta, onCerrarJornada }) {
+  // Demo survey for testing
+  const DEMO_SURVEY = {
+    encuesta_id: "e4b2a1f0-demo",
+    titulo: "Encuesta de prueba — SurveyAI",
+    sesiones: [
+      {
+        sesion:1, nombre:"Screening inicial",
+        preguntas:[
+          {id:1,tipo:"seleccion_unica",metodologia:"IAT",
+            enunciado:"¿Tiene mascotas actualmente en su hogar?",
+            opciones:["Sí, solo perro","Sí, solo gato","Sí, ambos","No tengo mascotas"],
+            reglas:{requerido:true,salto_logico:{"No tengo mascotas":"FIN_CON_DESCARTE"}}},
+          {id:2,tipo:"seleccion_multiple",metodologia:"Conductual",
+            enunciado:"¿Cuál es su mayor complicación al alimentar sus mascotas?",
+            opciones:["Espacio de almacenamiento","Gasto económico","Riesgo de consumo cruzado","Ninguna"],
+            reglas:{max_opciones:2}},
+        ]
+      },
+      {
+        sesion:2, nombre:"Propuesta de valor",
+        preguntas:[
+          {id:3,tipo:"seleccion_unica",metodologia:"Conjoint",
+            enunciado:"¿Qué certificación le daría más confianza para comprar un alimento unificado?",
+            opciones:["Respaldo de veterinarios","Estudios clínicos","Garantía de palatabilidad"],
+            reglas:{requerido:true}},
+        ]
+      }
+    ]
+  };
+
+  return (
+    <div style={{flex:1,overflowY:"auto",padding:18}}>
       {/* Jornada info */}
-      <div style={{background:C.card,borderRadius:14,padding:14,border:`1px solid ${C.primary}22`,marginBottom:20}}>
-        <div style={{fontSize:9,fontWeight:700,color:C.primary,textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>JORNADA ACTIVA</div>
+      <div style={{background:T.card,borderRadius:14,padding:14,
+        border:`1px solid ${T.cyan}18`,marginBottom:18}}>
+        <div style={{fontSize:9,fontWeight:700,color:T.cyan,textTransform:"uppercase",
+          letterSpacing:".07em",marginBottom:8}}>JORNADA ACTIVA</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[["📍 Comuna",jornada.comuna],["🏪 Tipo punto",jornada.tipoPunto],["🕐 Inicio",jornada.hora],["📅 Fecha",new Date(jornada.inicio).toLocaleDateString("es-CL")]].map(([l,v])=>(
-            <div key={l} style={{background:C.elevated,borderRadius:8,padding:"8px 10px"}}>
-              <div style={{fontSize:9,color:C.textMuted,marginBottom:2}}>{l}</div>
-              <div style={{fontSize:11,color:C.text,fontWeight:600}}>{v}</div>
+          {[
+            ["📍 Comuna", jornada.comuna],
+            ["🏪 Punto", jornada.tipoPunto],
+            ["🕐 Inicio", jornada.hora],
+            ["🛰️ GPS", jornada.gps?`${jornada.gps.lat?.slice(0,8)}...`:"Sin GPS"],
+          ].map(([l,v])=>(
+            <div key={l} style={{background:T.elevated,borderRadius:8,padding:"8px 10px"}}>
+              <div style={{fontSize:9,color:T.textMuted,marginBottom:2}}>{l}</div>
+              <div style={{fontSize:11,color:T.text,fontWeight:600}}>{v}</div>
             </div>
           ))}
         </div>
-        {jornada.nombreLocal&&<div style={{marginTop:8,fontSize:11,color:C.textSec}}>📌 {jornada.nombreLocal}</div>}
-        {jornada.gps&&<div style={{marginTop:6,fontSize:10,color:C.textMuted}}>🛰️ GPS: {jornada.gps.lat}, {jornada.gps.lng}</div>}
+        {jornada.nombreLocal&&(
+          <div style={{marginTop:8,fontSize:11,color:T.textSec}}>📌 {jornada.nombreLocal}</div>
+        )}
       </div>
 
-      {/* Stats */}
+      {/* Stats del día */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:20}}>
-        {[["Hoy",stats.today,C.success],["Total",stats.total,C.primary],["Descartadas",stats.discards,C.warning]].map(([l,v,c])=>(
-          <div key={l} style={{background:C.surface,borderRadius:12,padding:"12px 14px",border:`1px solid ${C.border}`}}>
+        {[["Hoy",stats.hoy,T.green],["Total",stats.total,T.cyan],["Descartadas",stats.descartes,T.yellow]].map(([l,v,c])=>(
+          <div key={l} style={{background:T.card,borderRadius:12,padding:"12px 14px",
+            border:`1px solid ${T.border}`}}>
             <div style={{fontSize:22,fontWeight:900,color:c}}>{v}</div>
-            <div style={{fontSize:10,color:C.textMuted}}>{l}</div>
+            <div style={{fontSize:10,color:T.textMuted}}>{l}</div>
           </div>
         ))}
       </div>
 
-      <div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Encuestas asignadas</div>
-      {surveys.map((s,i)=>(
-        <div key={i} style={{background:C.surface,borderRadius:16,padding:16,border:`1px solid ${C.border}`,marginBottom:12}}>
-          <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:3,lineHeight:1.4}}>{s.titulo}</div>
-          <div style={{fontSize:11,color:C.textMuted,marginBottom:12}}>{s.empresa}</div>
-          <div style={{display:"flex",gap:7,marginBottom:14}}>
-            <span style={{fontSize:10,color:C.primary,background:`${C.primary}18`,padding:"2px 9px",borderRadius:20,fontWeight:700}}>{s.preguntas.length} preguntas</span>
-            <span style={{fontSize:10,color:C.success,background:`${C.success}18`,padding:"2px 9px",borderRadius:20,fontWeight:700}}>{stats.today} realizadas hoy</span>
-          </div>
-          <button onClick={()=>onStart(s)} style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:C.grad,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:7,boxShadow:`0 4px 14px rgba(6,182,212,0.3)`}}>
-            Nueva encuesta <ArrowRight size={15}/>
-          </button>
-        </div>
-      ))}
+      {/* Encuesta asignada */}
+      <div style={{fontSize:10,fontWeight:700,color:T.textMuted,textTransform:"uppercase",
+        letterSpacing:".07em",marginBottom:10}}>Encuesta asignada</div>
 
-      <button onClick={onEndJornada} style={{width:"100%",padding:"11px",borderRadius:12,border:`1px solid ${C.border}`,background:"transparent",color:C.textMuted,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginTop:8,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>
-        <LogOut size={13}/>Cerrar jornada
+      <div style={{background:T.card,borderRadius:16,padding:18,
+        border:`1px solid ${T.border}`,marginBottom:14}}>
+        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:3,lineHeight:1.4}}>
+          {DEMO_SURVEY.titulo}
+        </div>
+        <div style={{display:"flex",gap:7,marginBottom:16,flexWrap:"wrap"}}>
+          <span style={{fontSize:10,color:T.cyan,background:`${T.cyan}12`,
+            padding:"2px 9px",borderRadius:20,fontWeight:700}}>
+            {DEMO_SURVEY.sesiones.length} sesiones
+          </span>
+          <span style={{fontSize:10,color:T.violet,background:`${T.violet}12`,
+            padding:"2px 9px",borderRadius:20,fontWeight:700}}>
+            {DEMO_SURVEY.sesiones.reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
+          </span>
+          <span style={{fontSize:10,color:T.green,background:`${T.green}12`,
+            padding:"2px 9px",borderRadius:20,fontWeight:700}}>
+            {stats.hoy} realizadas hoy
+          </span>
+        </div>
+        <button onClick={()=>onIniciarEncuesta(DEMO_SURVEY)}
+          style={{width:"100%",padding:"13px",borderRadius:12,border:"none",
+            background:T.grad,color:"#fff",fontSize:14,fontWeight:700,
+            cursor:"pointer",fontFamily:"inherit",display:"flex",
+            alignItems:"center",justifyContent:"center",gap:7,
+            boxShadow:"0 4px 14px rgba(6,182,212,0.3)"}}>
+          Nueva entrevista <ArrowRight size={15}/>
+        </button>
+      </div>
+
+      <button onClick={onCerrarJornada}
+        style={{width:"100%",padding:"11px",borderRadius:12,
+          border:`1px solid ${T.border}`,background:"transparent",
+          color:T.textMuted,fontSize:13,fontWeight:600,cursor:"pointer",
+          fontFamily:"inherit",display:"flex",alignItems:"center",
+          justifyContent:"center",gap:7}}>
+        <LogOut size={13}/>Cerrar jornada del día
       </button>
     </div>
   );
 }
 
-// ─── APP SHELL ────────────────────────────────────────
-export default function EncuestadorApp(){
-  const[screen,setScreen]=useState(()=>Store.load("enc_session")?(Store.load("enc_session").firstLogin?"changepass":"jornada"):"login");
-  const[user,setUser]=useState(()=>Store.load("enc_session"));
-  const[jornada,setJornada]=useState(()=>Store.load("jornada_activa"));
-  const[activeSurvey,setActiveSurvey]=useState(null);
-  const[online,setOnline]=useState(navigator.onLine);
-  const[pendingCount,setPendingCount]=useState(()=>Store.queue.count());
-  const[syncing,setSyncing]=useState(false);
-  const[stats,setStats]=useState(()=>Store.load("enc_stats")||{today:0,total:0,discards:0});
+// ═══════════════════════════════════════════════════════════════
+// APP SHELL — CAPA 3
+// ═══════════════════════════════════════════════════════════════
+export default function Layer3Encuestador({ session, onLogout }) {
+  const [screen, setScreen] = useState("jornada");
+  const [jornada, setJornada] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("sai_jornada")||"null"); } catch { return null; }
+  });
+  const [activeSurvey, setActiveSurvey] = useState(null);
+  const [ficha, setFicha] = useState(null);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(()=>Q.count());
+  const [syncing, setSyncing] = useState(false);
+  const [stats, setStats] = useState(()=>{ Stats.resetHoy(); return Stats.get(); });
 
   useEffect(()=>{
-    const on=()=>setOnline(true);const off=()=>setOnline(false);
-    window.addEventListener("online",on);window.addEventListener("offline",off);
-    return()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};
+    const on=()=>setOnline(true);
+    const off=()=>setOnline(false);
+    window.addEventListener("online",on);
+    window.addEventListener("offline",off);
+    return()=>{ window.removeEventListener("online",on); window.removeEventListener("offline",off); };
   },[]);
 
-  const handleSync=async()=>{
-    const queue=Store.queue.get();
-    if(!queue.length)return;
+  useEffect(()=>{ if(jornada) setScreen("home"); },[]);
+
+  const syncQueue = async () => {
+    const q = Q.get();
+    if (!q.length) return;
     setSyncing(true);
-    for(const item of queue){
-      try{await new Promise(r=>setTimeout(r,350));Store.queue.remove(item.local_id);setPendingCount(Store.queue.count());}
-      catch{break;}
+    for (const item of q) {
+      try { await guardarRespuesta(item); Q.remove(item.local_id); setPendingCount(Q.count()); }
+      catch { break; }
     }
     setSyncing(false);
   };
 
-  const updateStats=(isDiscard)=>{
-    const ns={today:stats.today+1,total:stats.total+1,discards:isDiscard?stats.discards+1:stats.discards};
-    setStats(ns);Store.save("enc_stats",ns);
-  };
+  const user = { id: session?.email||"enc-demo", nombre: session?.nombre||"Encuestador",
+    empresa: session?.empresa||"Mi empresa" };
 
-  const handleComplete=(savedOffline)=>{
-    updateStats(false);setPendingCount(Store.queue.count());
-    setTimeout(()=>{setActiveSurvey(null);},savedOffline?300:2300);
-  };
-
-  const handleDiscard=()=>{
-    updateStats(true);setPendingCount(Store.queue.count());
-    setTimeout(()=>{setActiveSurvey(null);},2600);
-  };
-
-  const handleEndJornada=()=>{
-    Store.remove("jornada_activa");
-    setJornada(null);setScreen("jornada");
-  };
-
-  if(screen==="login"||!user) return <LoginScreen onLogin={u=>{setUser(u);if(u.firstLogin)setScreen("changepass");else setScreen("jornada");}}/>;
-  if(screen==="changepass") return <ChangePasswordScreen user={user} onDone={u=>{setUser(u);setScreen("jornada");}}/>;
-  if(screen==="jornada"||!jornada) return <JornadaScreen user={user} onStart={j=>{const jd={...j};Store.save("jornada_activa",jd);setJornada(jd);setScreen("home");}}/>;
-
-  return(
-    <div style={{fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:480,margin:"0 auto"}}>
+  return (
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:T.bg,
+      minHeight:"100vh",color:T.text,maxWidth:480,margin:"0 auto",
+      display:"flex",flexDirection:"column"}}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0}input,button,select{font-family:inherit}
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+        input,button,select{font-family:inherit}
         @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
       `}</style>
-      <div style={{position:"sticky",top:0,zIndex:90,background:C.surface,borderBottom:`1px solid ${C.border}`}}>
-        <div style={{padding:"12px 18px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{display:"flex",alignItems:"center",gap:9}}>
-            {activeSurvey&&<div onClick={()=>setActiveSurvey(null)} style={{width:30,height:30,borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",background:C.elevated,color:C.textSec}}><ArrowLeft size={14}/></div>}
-            <div>
-              <div style={{fontSize:14,fontWeight:800,color:C.text}}>{activeSurvey?"Encuesta en curso":"Mis encuestas"}</div>
-              <div style={{fontSize:10,color:C.textMuted}}>{user.name} · {jornada?.comuna}</div>
+
+      {/* Header */}
+      {screen!=="jornada"&&(
+        <div style={{position:"sticky",top:0,zIndex:90,background:T.surface,
+          borderBottom:`1px solid ${T.border}`}}>
+          <div style={{padding:"12px 18px",display:"flex",alignItems:"center",
+            justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:9}}>
+              {(screen==="ficha"||screen==="encuesta")&&(
+                <div onClick={()=>setScreen(screen==="encuesta"?"ficha":"home")}
+                  style={{width:30,height:30,borderRadius:8,cursor:"pointer",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    background:T.elevated,color:T.textSec}}>
+                  <ArrowLeft size={14}/>
+                </div>
+              )}
+              <div>
+                <div style={{fontSize:14,fontWeight:800,color:T.text}}>
+                  {screen==="home"?"Mis encuestas":screen==="ficha"?"Ficha del entrevistado":"Encuesta en curso"}
+                </div>
+                <div style={{fontSize:10,color:T.textMuted}}>
+                  {user.nombre} · {jornada?.comuna||""}
+                </div>
+              </div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:7}}>
+              <div style={{display:"flex",alignItems:"center",gap:4,
+                background:online?`${T.green}12`:`${T.red}12`,
+                padding:"3px 9px",borderRadius:20}}>
+                {online?<Wifi size={9} color={T.green}/>:<WifiOff size={9} color={T.red}/>}
+                <span style={{fontSize:9,fontWeight:700,
+                  color:online?T.green:T.red}}>{online?"Online":"Offline"}</span>
+              </div>
+              <div onClick={onLogout}
+                style={{width:28,height:28,borderRadius:7,cursor:"pointer",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  background:T.elevated,color:T.textMuted}}>
+                <LogOut size={12}/>
+              </div>
             </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:7}}>
-            <div style={{display:"flex",alignItems:"center",gap:4,background:online?`${C.success}18`:`${C.danger}18`,padding:"3px 9px",borderRadius:20}}>
-              {online?<Wifi size={10} color={C.success}/>:<WifiOff size={10} color={C.danger}/>}
-              <span style={{fontSize:9,fontWeight:700,color:online?C.success:C.danger}}>{online?"Online":"Offline"}</span>
-            </div>
-          </div>
+          <OfflineBanner online={online} count={pendingCount}
+            onSync={syncQueue} syncing={syncing}/>
         </div>
-        <OfflineBanner online={online} count={pendingCount} onSync={handleSync} syncing={syncing}/>
-      </div>
-      <div style={{paddingBottom:24}}>
-        {!activeSurvey?<HomeScreen user={user} jornada={jornada} pendingCount={pendingCount} stats={stats} onStart={s=>setActiveSurvey(s)} onEndJornada={handleEndJornada}/>
-          :<SurveyForm survey={activeSurvey} user={user} jornada={jornada} online={online} onComplete={handleComplete} onDiscard={handleDiscard}/>}
-      </div>
+      )}
+
+      {/* Screens */}
+      {screen==="jornada"&&(
+        <PantallaJornada user={user} onStart={j=>{
+          setJornada(j); setScreen("home");
+        }}/>
+      )}
+
+      {screen==="home"&&jornada&&(
+        <PantallaHome user={user} jornada={jornada} stats={stats}
+          pendingCount={pendingCount} online={online}
+          onIniciarEncuesta={s=>{setActiveSurvey(s);setScreen("ficha");}}
+          onCerrarJornada={()=>{
+            try{localStorage.removeItem("sai_jornada");}catch{}
+            setJornada(null); setScreen("jornada");
+          }}/>
+      )}
+
+      {screen==="ficha"&&activeSurvey&&(
+        <PantallaFicha jornada={jornada}
+          onContinuar={f=>{setFicha(f);setScreen("encuesta");}}
+          onCancelar={()=>setScreen("home")}/>
+      )}
+
+      {screen==="encuesta"&&activeSurvey&&(
+        <PantallaEncuesta
+          survey={activeSurvey} jornada={jornada} ficha={ficha}
+          user={user} online={online}
+          onComplete={(savedOffline)=>{
+            setStats(Stats.get()); setPendingCount(Q.count());
+            setTimeout(()=>{setActiveSurvey(null);setFicha(null);setScreen("home");},savedOffline?400:2400);
+          }}
+          onDiscard={()=>{
+            setStats(Stats.get()); setPendingCount(Q.count());
+            setTimeout(()=>{setActiveSurvey(null);setFicha(null);setScreen("home");},2900);
+          }}/>
+      )}
     </div>
   );
 }
