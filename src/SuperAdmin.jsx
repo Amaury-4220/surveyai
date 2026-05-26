@@ -1,951 +1,464 @@
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  SURVEYAI — CAPA 3: APP ENCUESTADOR                         ║
-// ║  Offline First · Jornada · GPS · Sync automático            ║
+// ║  SURVEYAI — CAPA 5: SUPERADMIN + MONITOREO EN VIVO          ║
+// ║  Trial clock · Estados · Gestión de acceso                  ║
 // ║  © SurveyAI 2025 — Todos los derechos reservados           ║
 // ╚══════════════════════════════════════════════════════════════╝
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
-  MapPin, Clock, Building, ArrowRight, ArrowLeft, Check, X,
-  Send, RefreshCw, AlertCircle, CheckCircle, Wifi, WifiOff,
-  Upload, LogOut, ChevronDown, User, Phone, Calendar,
-  Smartphone, BarChart3, Activity, Shield, Zap, Eye,
-  MessageCircle, Home, ClipboardList, TrendingUp
+  Shield, Building2, Users, Smartphone, Activity, Clock,
+  CheckCircle, XCircle, AlertCircle, RefreshCw, Settings,
+  BarChart3, Database, Server, Zap, LogOut, ArrowRight,
+  Eye, Lock, Unlock, Bell, Search, MoreHorizontal, Wifi,
+  TrendingUp, CreditCard, Terminal, ChevronRight, ChevronLeft
 } from "lucide-react";
-import { guardarRespuesta } from "../firebase.js";
+import {
+  AreaChart, Area, ResponsiveContainer, XAxis, YAxis,
+  CartesianGrid, Tooltip
+} from "recharts";
 
-// ─── Design System ────────────────────────────────────────────
 const T = {
-  bg:"#03070E", surface:"#060C18", card:"#090F1E",
-  elevated:"#0C1526", elevated2:"#101C30",
-  border:"rgba(6,182,212,0.1)", borderFocus:"rgba(6,182,212,0.45)",
-  cyan:"#06B6D4", violet:"#7C3AED", green:"#10B981",
-  red:"#EF4444", yellow:"#F59E0B",
-  text:"#F1F5F9", textSec:"#64748B", textMuted:"#1A3050",
-  grad:"linear-gradient(135deg,#06B6D4,#7C3AED)",
+  bg:"#04080F", surface:"#060C18", card:"#090F1E",
+  elevated:"#0C1526", border:"rgba(99,102,241,0.1)",
+  primary:"#6366F1", cyan:"#06B6D4", green:"#10B981",
+  red:"#EF4444", yellow:"#F59E0B", orange:"#F97316",
+  text:"#F1F5F9", textSec:"#64748B", textMuted:"#1E3A5F",
+  grad:"linear-gradient(135deg,#6366F1,#8B5CF6)",
 };
 
-// ─── Offline Queue (localStorage) ────────────────────────────
-const Q = {
-  add: (item) => {
-    try {
-      const q = JSON.parse(localStorage.getItem("sai_q")||"[]");
-      q.push({...item, local_id:`l-${Date.now()}`, queued_at:new Date().toISOString()});
-      localStorage.setItem("sai_q", JSON.stringify(q));
-    } catch {}
-  },
-  get: () => { try { return JSON.parse(localStorage.getItem("sai_q")||"[]"); } catch { return []; } },
-  remove: (id) => {
-    try {
-      const q = JSON.parse(localStorage.getItem("sai_q")||"[]");
-      localStorage.setItem("sai_q", JSON.stringify(q.filter(i=>i.local_id!==id)));
-    } catch {}
-  },
-  count: () => { try { return JSON.parse(localStorage.getItem("sai_q")||"[]").length; } catch { return 0; } },
-};
+// ─── Trial Clock ──────────────────────────────────────────────
+function TrialCountdown({ expiresAt, compact }) {
+  const [rem, setRem] = useState("");
+  const [pct, setPct] = useState(100);
 
-// ─── Stats store ──────────────────────────────────────────────
-const Stats = {
-  get: () => { try { return JSON.parse(localStorage.getItem("sai_stats")||'{"hoy":0,"total":0,"descartes":0}'); } catch { return {hoy:0,total:0,descartes:0}; } },
-  update: (isDiscard) => {
-    const s = Stats.get();
-    Stats.save({hoy:s.hoy+1,total:s.total+1,descartes:isDiscard?s.descartes+1:s.descartes});
-  },
-  save: (s) => { try { localStorage.setItem("sai_stats",JSON.stringify(s)); } catch {} },
-  resetHoy: () => {
-    const s = Stats.get();
-    const lastReset = localStorage.getItem("sai_last_reset");
-    const hoy = new Date().toDateString();
-    if (lastReset !== hoy) { Stats.save({...s,hoy:0}); localStorage.setItem("sai_last_reset",hoy); }
-  },
-};
+  useEffect(()=>{
+    const TOTAL = 72*3600000;
+    const tick = () => {
+      const diff = expiresAt - Date.now();
+      if (diff <= 0) { setRem("EXPIRADO"); setPct(0); return; }
+      const h = Math.floor(diff/3600000);
+      const m = Math.floor((diff%3600000)/60000);
+      const s = Math.floor((diff%60000)/1000);
+      setRem(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+      setPct(Math.round((diff/TOTAL)*100));
+    };
+    tick();
+    const iv = setInterval(tick,1000);
+    return ()=>clearInterval(iv);
+  },[expiresAt]);
 
-// ─── Comunas de Chile ─────────────────────────────────────────
-const COMUNAS = [
-  "Cerro Navia","Santiago Centro","Maipú","La Florida","Pudahuel",
-  "Peñalolén","San Bernardo","El Bosque","Quilicura","Renca",
-  "Conchalí","Recoleta","Independencia","Providencia","Ñuñoa",
-  "Las Condes","Vitacura","Lo Barnechea","Huechuraba","Colina",
-  "Puente Alto","La Pintana","Lo Espejo","Pedro Aguirre Cerda",
-  "Lo Prado","Quinta Normal","Estación Central","Cerrillos",
-  "Padre Hurtado","Peñaflor","Talagante","Melipilla","Buin","Paine",
-  "Valparaíso","Viña del Mar","Concepción","Talcahuano","Temuco",
-  "Antofagasta","La Serena","Coquimbo","Rancagua","Talca","Arica",
-  "Iquique","Puerto Montt","Osorno","Valdivia","Punta Arenas",
+  if (compact) return (
+    <span style={{fontSize:10,fontWeight:800,color:T.yellow,
+      fontFamily:"monospace"}}>{rem}</span>
+  );
+
+  return (
+    <div style={{textAlign:"center"}}>
+      <div style={{fontSize:32,fontWeight:900,color:T.yellow,
+        fontFamily:"monospace",letterSpacing:".05em",marginBottom:6}}>{rem}</div>
+      <div style={{height:4,background:T.elevated,borderRadius:4,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${pct}%`,
+          background:`linear-gradient(90deg,${T.yellow},${T.orange})`,
+          borderRadius:4,transition:"width 1s linear"}}/>
+      </div>
+      <div style={{fontSize:10,color:T.textMuted,marginTop:4}}>
+        {pct}% del trial restante
+      </div>
+    </div>
+  );
+}
+
+// ─── Mock clientes ────────────────────────────────────────────
+const MOCK_CLIENTES = [
+  { id:"c1", empresa:"Alimentos del Sur S.A.", email:"admin@alimentosdelsur.cl",
+    estado:"activo", plan:"Pro", respuestas:247, encuestas:3,
+    trialExpiry:null, creado:"2025-05-10", device_fp:"fp-001" },
+  { id:"c2", empresa:"RetailCorp Ltda.", email:"ti@retailcorp.cl",
+    estado:"trial", plan:"Trial",respuestas:12, encuestas:1,
+    trialExpiry:Date.now()+18*3600000, creado:"2025-05-22", device_fp:"fp-002" },
+  { id:"c3", empresa:"MarketPro SpA", email:"ops@marketpro.cl",
+    estado:"trial", plan:"Trial", respuestas:0, encuestas:0,
+    trialExpiry:Date.now()+52*3600000, creado:"2025-05-23", device_fp:"fp-003" },
+  { id:"c4", empresa:"Consultora Nexo", email:"info@nexo.cl",
+    estado:"expirado", plan:"—", respuestas:89, encuestas:2,
+    trialExpiry:Date.now()-5*3600000, creado:"2025-05-19", device_fp:"fp-004" },
+  { id:"c5", empresa:"Clínica Andes", email:"sistemas@clinica.cl",
+    estado:"desactivado", plan:"—", respuestas:31, encuestas:1,
+    trialExpiry:null, creado:"2025-05-15", device_fp:"fp-005" },
 ];
 
-const TIPOS_PUNTO = [
-  "Mall / Centro comercial","Calle / Vía pública","Feria libre",
-  "Local comercial","Supermercado / Hipermercado","Farmacia / Droguería",
-  "Centro de salud / Clínica","Establecimiento educacional",
-  "Mercado / Feria municipal","Plaza / Parque público","Otro",
-];
-
-// ─── Primitives ───────────────────────────────────────────────
-const Field = ({ label, children }) => (
-  <div style={{marginBottom:14}}>
-    {label&&<div style={{fontSize:10,fontWeight:700,color:T.textMuted,
-      textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>{label}</div>}
-    {children}
-  </div>
-);
-
-const Input = ({ value, onChange, placeholder, type="text" }) => (
-  <input type={type} value={value} onChange={e=>onChange(e.target.value)}
-    placeholder={placeholder}
-    style={{width:"100%",background:T.elevated,border:`1.5px solid ${T.border}`,
-      borderRadius:11,padding:"11px 13px",color:T.text,fontSize:14,
-      outline:"none",boxSizing:"border-box",fontFamily:"inherit",transition:"border .2s"}}
-    onFocus={e=>e.currentTarget.style.borderColor=T.borderFocus}
-    onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
-);
-
-const Select = ({ value, onChange, options, placeholder="" }) => (
-  <div style={{position:"relative"}}>
-    <select value={value} onChange={e=>onChange(e.target.value)}
-      style={{width:"100%",background:T.elevated,border:`1.5px solid ${T.border}`,
-        borderRadius:11,padding:"11px 36px 11px 13px",color:value?T.text:T.textMuted,
-        fontSize:14,outline:"none",appearance:"none",boxSizing:"border-box",
-        fontFamily:"inherit",transition:"border .2s"}}
-      onFocus={e=>e.currentTarget.style.borderColor=T.borderFocus}
-      onBlur={e=>e.currentTarget.style.borderColor=T.border}>
-      <option value="">{placeholder||"Seleccionar..."}</option>
-      {options.map(o=><option key={o} value={o}>{o}</option>)}
-    </select>
-    <ChevronDown size={13} style={{position:"absolute",right:12,top:"50%",
-      transform:"translateY(-50%)",color:T.textMuted,pointerEvents:"none"}}/>
-  </div>
-);
-
-const PrimaryBtn = ({ children, onClick, loading, disabled, icon:I, v="primary" }) => {
-  const bg = v==="green"?"linear-gradient(135deg,#10B981,#059669)":T.grad;
-  const shadow = v==="green"?"0 4px 16px rgba(16,185,129,0.35)":"0 4px 16px rgba(6,182,212,0.35)";
-  return (
-    <button onClick={disabled||loading?undefined:onClick} disabled={disabled||loading}
-      style={{width:"100%",padding:"14px",borderRadius:13,border:"none",
-        background:(disabled||loading)?T.elevated:bg,
-        color:(disabled||loading)?T.textMuted:"#fff",fontSize:14,fontWeight:700,
-        cursor:(disabled||loading)?"not-allowed":"pointer",fontFamily:"inherit",
-        display:"flex",alignItems:"center",justifyContent:"center",gap:7,
-        transition:"all .2s",
-        boxShadow:(disabled||loading)?"none":shadow}}>
-      {loading
-        ?<><RefreshCw size={14} style={{animation:"spin 1s linear infinite"}}/>Procesando...</>
-        :<>{I&&<I size={14}/>}{children}</>}
-    </button>
-  );
+const ESTADO_MAP = {
+  activo:      { color:T.green,  bg:`${T.green}18`,  label:"Activo",     icon:CheckCircle },
+  trial:       { color:T.yellow, bg:`${T.yellow}18`, label:"Trial",      icon:Clock },
+  expirado:    { color:T.orange, bg:`${T.orange}18`, label:"Expirado",   icon:AlertCircle },
+  desactivado: { color:T.red,    bg:`${T.red}18`,    label:"Desactivado",icon:XCircle },
 };
 
-// ─── Offline Banner ───────────────────────────────────────────
-function OfflineBanner({ online, count, onSync, syncing }) {
-  if (online && count===0) return null;
-  return (
-    <div style={{
-      background:online?`${T.cyan}12`:`${T.yellow}12`,
-      borderBottom:`1px solid ${online?T.cyan+"25":T.yellow+"25"}`,
-      padding:"7px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-      <div style={{display:"flex",alignItems:"center",gap:7}}>
-        {online?<Wifi size={11} color={T.cyan}/>:<WifiOff size={11} color={T.yellow}/>}
-        <span style={{fontSize:11,fontWeight:700,color:online?T.cyan:T.yellow}}>
-          {online?`${count} respuestas pendientes de sincronizar`:`Sin conexión — ${count} en cola local`}
-        </span>
-      </div>
-      {online&&count>0&&(
-        <button onClick={onSync} disabled={syncing}
-          style={{display:"flex",alignItems:"center",gap:4,background:T.cyan,
-            border:"none",borderRadius:7,padding:"3px 10px",color:"#fff",
-            fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          <Upload size={9}/>{syncing?"...":"Sincronizar"}
-        </button>
-      )}
-    </div>
-  );
+const activityData = [
+  {h:"00",r:2},{h:"04",r:0},{h:"08",r:12},{h:"12",r:34},
+  {h:"16",r:28},{h:"20",r:15},{h:"23",r:8},
+];
+
+const NAV = [
+  {id:"monitor",label:"Monitor en vivo",icon:Activity},
+  {id:"clientes",label:"Clientes",icon:Building2},
+  {id:"sistema",label:"Sistema",icon:Server},
+  {id:"settings",label:"Configuración",icon:Settings},
+];
+
+function Card({children,s,glow}){
+  return <div style={{background:T.card,border:`1px solid ${glow?T.primary+"40":T.border}`,
+    borderRadius:14,padding:20,transition:"all .2s",...s}}>{children}</div>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PANTALLA 1: JORNADA
-// ═══════════════════════════════════════════════════════════════
-function PantallaJornada({ user, onStart }) {
-  const [comuna, setComuna] = useState("");
-  const [tipoPunto, setTipoPunto] = useState("");
-  const [nombreLocal, setNombreLocal] = useState("");
-  const [gps, setGps] = useState(null);
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const [errors, setErrors] = useState({});
-  const now = new Date();
-
-  const getGPS = useCallback(() => {
-    setGpsLoading(true);
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          setGps({
-            lat: pos.coords.latitude.toFixed(6),
-            lng: pos.coords.longitude.toFixed(6),
-            acc: Math.round(pos.coords.accuracy),
-            ts: new Date().toISOString(),
-          });
-          setGpsLoading(false);
-        },
-        () => {
-          setGps({ lat:"-33.4489", lng:"-70.6693", acc:999, simulated:true, ts:new Date().toISOString() });
-          setGpsLoading(false);
-        },
-        { timeout:8000, enableHighAccuracy:true }
-      );
-    } else {
-      setGps({ lat:"-33.4489", lng:"-70.6693", acc:999, simulated:true, ts:new Date().toISOString() });
-      setGpsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { getGPS(); }, []);
-
-  const iniciar = () => {
-    const e = {};
-    if (!comuna) e.comuna = "Selecciona una comuna";
-    if (!tipoPunto) e.tipoPunto = "Selecciona el tipo de punto";
-    if (Object.keys(e).length) { setErrors(e); return; }
-    const jornada = {
-      comuna, tipoPunto, nombreLocal, gps,
-      fecha: now.toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"}),
-      hora: now.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"}),
-      inicio: now.toISOString(),
-    };
-    try { localStorage.setItem("sai_jornada",JSON.stringify(jornada)); } catch {}
-    onStart(jornada);
+function Btn({children,v="primary",icon:I,sm,s,onClick}){
+  const vs={
+    primary:{background:T.grad,color:"#fff",border:"none"},
+    ghost:{background:T.elevated,color:T.textSec,border:`1px solid ${T.border}`},
+    danger:{background:`${T.red}15`,color:T.red,border:`1px solid ${T.red}30`},
+    success:{background:`${T.green}15`,color:T.green,border:`1px solid ${T.green}30`},
   };
-
-  return (
-    <div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",
-      alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0}
-        input,button,select{font-family:inherit}
-        @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-      `}</style>
-
-      <div style={{width:"100%",maxWidth:420}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{width:56,height:56,borderRadius:16,
-            background:`${T.green}15`,border:`1px solid ${T.green}30`,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            margin:"0 auto 12px"}}>
-            <MapPin size={22} color={T.green}/>
-          </div>
-          <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:3}}>
-            Declarar jornada
-          </div>
-          <div style={{fontSize:12,color:T.textMuted}}>
-            {user?.nombre||"Encuestador"} · {user?.empresa||""}
-          </div>
-        </div>
-
-        <div style={{background:T.card,borderRadius:18,padding:22,
-          border:`1px solid ${T.border}`,marginBottom:14}}>
-
-          {/* Fecha y hora automática */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,marginBottom:18}}>
-            <div style={{background:T.elevated,borderRadius:10,padding:"10px 13px",
-              border:`1px solid ${T.border}`}}>
-              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,
-                textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Fecha</div>
-              <div style={{fontSize:12,fontWeight:600,color:T.text,textTransform:"capitalize"}}>
-                {now.toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"})}
-              </div>
-            </div>
-            <div style={{background:T.elevated,borderRadius:10,padding:"10px 13px",
-              border:`1px solid ${T.border}`,minWidth:70}}>
-              <div style={{fontSize:9,color:T.textMuted,fontWeight:700,
-                textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Hora</div>
-              <div style={{fontSize:15,fontWeight:900,color:T.cyan,fontFamily:"monospace"}}>
-                {now.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})}
-              </div>
-            </div>
-          </div>
-
-          <Field label="Comuna *">
-            <Select value={comuna} onChange={v=>{setComuna(v);setErrors(e=>({...e,comuna:undefined}));}}
-              options={COMUNAS} placeholder="Selecciona tu comuna"/>
-            {errors.comuna&&<div style={{fontSize:11,color:T.red,marginTop:4}}>{errors.comuna}</div>}
-          </Field>
-
-          <Field label="Tipo de punto *">
-            <Select value={tipoPunto} onChange={v=>{setTipoPunto(v);setErrors(e=>({...e,tipoPunto:undefined}));}}
-              options={TIPOS_PUNTO} placeholder="¿Dónde estás trabajando?"/>
-            {errors.tipoPunto&&<div style={{fontSize:11,color:T.red,marginTop:4}}>{errors.tipoPunto}</div>}
-          </Field>
-
-          <Field label="Nombre del local (opcional)">
-            <Input value={nombreLocal} onChange={setNombreLocal}
-              placeholder="Ej: Jumbo Apoquindo, Feria Lo Valledor..."/>
-          </Field>
-
-          {/* GPS Status */}
-          <div style={{padding:"10px 13px",borderRadius:10,marginBottom:16,
-            background:gps?`${T.green}08`:`${T.yellow}08`,
-            border:`1px solid ${gps?T.green+"25":T.yellow+"25"}`,
-            display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{display:"flex",alignItems:"center",gap:7}}>
-              <MapPin size={12} color={gps?T.green:T.yellow}/>
-              <span style={{fontSize:11,color:gps?T.green:T.yellow,fontWeight:600}}>
-                {gpsLoading?"Obteniendo GPS..."
-                  :gps?`GPS: ${gps.lat}, ${gps.lng} (±${gps.acc}m${gps.simulated?" sim":""})`
-                  :"Sin GPS"}
-              </span>
-            </div>
-            {!gpsLoading&&<div onClick={getGPS} style={{cursor:"pointer",color:T.textMuted}}>
-              <RefreshCw size={11}/>
-            </div>}
-          </div>
-
-          <PrimaryBtn v="green" icon={ArrowRight} onClick={iniciar}>
-            Comenzar jornada
-          </PrimaryBtn>
-        </div>
-      </div>
-    </div>
-  );
+  return <button onClick={onClick}
+    style={{display:"inline-flex",alignItems:"center",gap:5,borderRadius:9,fontWeight:700,
+      cursor:"pointer",padding:sm?"5px 11px":"9px 16px",fontSize:sm?11:13,
+      transition:"all .15s",fontFamily:"inherit",...vs[v],...s}}>
+    {I&&<I size={sm?11:13}/>}{children}
+  </button>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PANTALLA 2: FICHA DEL ENTREVISTADO
-// ═══════════════════════════════════════════════════════════════
-function PantallaFicha({ jornada, onContinuar, onCancelar }) {
-  const [ficha, setFicha] = useState({
-    nombre_anonimo: "",
-    edad_rango: "",
-    genero: "",
-    tipo_local: "",
-  });
-
-  const set = (k,v) => setFicha(f=>({...f,[k]:v}));
-
-  return (
-    <div style={{flex:1,overflowY:"auto",padding:20}}>
-      <div style={{maxWidth:420,margin:"0 auto"}}>
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:3}}>
-            Ficha del entrevistado
-          </div>
-          <div style={{fontSize:11,color:T.textMuted}}>
-            {jornada.comuna} · {jornada.tipoPunto}
-          </div>
-        </div>
-
-        <div style={{background:T.card,borderRadius:16,padding:20,
-          border:`1px solid ${T.border}`,marginBottom:14}}>
-
-          <Field label="Nombre / Alias (opcional)">
-            <Input value={ficha.nombre_anonimo} onChange={v=>set("nombre_anonimo",v)}
-              placeholder="Anónimo si prefiere no decir"/>
-          </Field>
-
-          <Field label="Rango de edad">
-            <Select value={ficha.edad_rango} onChange={v=>set("edad_rango",v)}
-              options={["18-24","25-34","35-44","45-54","55-64","65+"]}/>
-          </Field>
-
-          <Field label="Género">
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              {["Masculino","Femenino","Otro"].map(g=>(
-                <div key={g} onClick={()=>set("genero",g)}
-                  style={{padding:"10px",borderRadius:10,cursor:"pointer",textAlign:"center",
-                    fontSize:12,fontWeight:600,transition:"all .15s",
-                    background:ficha.genero===g?`${T.cyan}15`:T.elevated,
-                    color:ficha.genero===g?T.cyan:T.textSec,
-                    border:`1.5px solid ${ficha.genero===g?T.cyan:T.border}`}}>
-                  {g}
-                </div>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="Tipo de establecimiento">
-            <Select value={ficha.tipo_local} onChange={v=>set("tipo_local",v)}
-              options={["Almacén/Minimarket","Supermercado","Mall","Feria","Calle","Otro"]}/>
-          </Field>
-        </div>
-
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onCancelar}
-            style={{flex:1,padding:"12px",borderRadius:12,border:`1px solid ${T.border}`,
-              background:T.elevated,color:T.textSec,fontSize:13,fontWeight:600,
-              cursor:"pointer",fontFamily:"inherit"}}>
-            Cancelar
-          </button>
-          <button onClick={()=>onContinuar(ficha)}
-            style={{flex:2,padding:"12px",borderRadius:12,border:"none",
-              background:T.grad,color:"#fff",fontSize:13,fontWeight:700,
-              cursor:"pointer",fontFamily:"inherit",display:"flex",
-              alignItems:"center",justifyContent:"center",gap:6,
-              boxShadow:"0 4px 14px rgba(6,182,212,0.3)"}}>
-            Iniciar encuesta <ArrowRight size={14}/>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function EstadoBadge({estado}){
+  const st = ESTADO_MAP[estado]||ESTADO_MAP.desactivado;
+  const Icon = st.icon;
+  return <span style={{display:"inline-flex",alignItems:"center",gap:4,
+    background:st.bg,color:st.color,padding:"3px 9px",borderRadius:20,
+    fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".04em"}}>
+    <Icon size={9}/>{st.label}
+  </span>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PANTALLA 3: ENCUESTA CONVERSACIONAL
-// ═══════════════════════════════════════════════════════════════
-function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, onDiscard }) {
-  const initResp = () => {
-    const s = {};
-    survey.sesiones?.forEach(ses => ses.preguntas?.forEach(p => {
-      s[`${ses.sesion}_${p.id}`] = p.tipo==="seleccion_multiple"?[]:""
-    }));
-    return s;
-  };
-
-  const allPreguntas = survey.sesiones?.flatMap(s =>
-    s.preguntas?.map(p => ({...p, sesion_id:s.sesion, sesion_nombre:s.nombre}))
-  ) || [];
-
-  const [resp, setResp] = useState(initResp());
-  const [step, setStep] = useState(0);
-  const [discarded, setDiscarded] = useState(null);
-  const [errors, setErrors] = useState({});
-  const [sending, setSending] = useState(false);
-  const [success, setSuccess] = useState(false);
-
-  const current = allPreguntas[step];
-  const total = allPreguntas.length;
-  const progress = total > 0 ? ((step) / total) * 100 : 0;
-  const currentKey = current ? `${current.sesion_id}_${current.id}` : null;
-
-  const handleChange = useCallback((key, val, tipo) => {
-    if (tipo==="seleccion_unica") {
-      setResp(r=>({...r,[key]:val}));
-      setErrors(e=>({...e,[key]:undefined}));
-      const p = allPreguntas.find(p=>`${p.sesion_id}_${p.id}`===key);
-      if (p?.reglas?.salto_logico?.[val]==="FIN_CON_DESCARTE") {
-        const payload = {
-          encuesta_id: survey.encuesta_id,
-          encuestador_id: user?.id||"enc-demo",
-          es_descarte: true,
-          pregunta_descarte_id: p.id,
-          jornada, ficha,
-          respuestas: {...resp,[key]:val},
-        };
-        if (online) { guardarRespuesta(payload).catch(()=>Q.add(payload)); }
-        else { Q.add(payload); }
-        Stats.update(true);
-        setDiscarded({ opcion:val, pregunta_id:p.id });
-        setTimeout(()=>onDiscard(), 2800);
-      }
-    } else if (tipo==="seleccion_multiple") {
-      setResp(r => {
-        const curr = Array.isArray(r[key])?r[key]:[];
-        const already = curr.includes(val);
-        const next = already?curr.filter(v=>v!==val):[...curr,val];
-        const p = allPreguntas.find(p=>`${p.sesion_id}_${p.id}`===key);
-        const max = p?.reglas?.max_opciones;
-        if (max&&next.length>max) return r;
-        return {...r,[key]:next};
-      });
-    }
-  }, [resp, allPreguntas, online, jornada, ficha, user, survey]);
-
-  const canAdvance = () => {
-    if (!current) return false;
-    if (current.reglas?.requerido) {
-      const val = resp[currentKey];
-      return Array.isArray(val)?val.length>0:val!=="";
-    }
-    return true;
-  };
-
-  const handleSubmit = async () => {
-    const errs = {};
-    allPreguntas.forEach(p => {
-      if (!p.reglas?.requerido) return;
-      const key = `${p.sesion_id}_${p.id}`;
-      const val = resp[key];
-      if (Array.isArray(val)?val.length===0:val==="") errs[key]="Obligatorio";
-    });
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-
-    setSending(true);
-    const payload = {
-      encuesta_id: survey.encuesta_id,
-      encuestador_id: user?.id||"enc-demo",
-      es_descarte: false,
-      jornada, ficha, respuestas: resp,
-    };
-    if (online) {
-      try { await guardarRespuesta(payload); Stats.update(false); setSending(false); setSuccess(true); setTimeout(()=>onComplete(false),2200); }
-      catch { Q.add(payload); Stats.update(false); setSending(false); onComplete(true); }
-    } else {
-      Q.add(payload); Stats.update(false); setSending(false); onComplete(true);
-    }
-  };
-
-  // ── Discard screen ──
-  if (discarded) return (
-    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
-      justifyContent:"center",padding:24,textAlign:"center"}}>
-      <div style={{width:60,height:60,borderRadius:16,background:`${T.yellow}15`,
-        display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}>
-        <AlertCircle size={24} color={T.yellow}/>
-      </div>
-      <div style={{fontSize:17,fontWeight:800,color:T.text,marginBottom:6}}>Encuesta descartada</div>
-      <div style={{fontSize:13,color:T.textSec,marginBottom:10}}>"{discarded.opcion}"</div>
-      <div style={{fontSize:11,color:T.textMuted,background:T.elevated,borderRadius:9,
-        padding:"7px 13px",fontFamily:"monospace",border:`1px solid ${T.border}`,marginBottom:16}}>
-        FIN_CON_DESCARTE → {online?"Registrado":"Cola offline"}
-      </div>
-      <div style={{fontSize:13,color:T.green,background:`${T.green}12`,
-        padding:"8px 18px",borderRadius:10,fontWeight:700}}>
-        ✓ {online?"Guardado en Firebase":"Guardado localmente"}
-      </div>
-    </div>
-  );
-
-  // ── Success screen ──
-  if (success) return (
-    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",
-      justifyContent:"center",padding:24,textAlign:"center"}}>
-      <div style={{width:68,height:68,borderRadius:18,background:`${T.green}15`,
-        display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
-        <CheckCircle size={30} color={T.green}/>
-      </div>
-      <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:6}}>¡Encuesta enviada!</div>
-      <div style={{fontSize:13,color:T.textSec}}>Respuestas guardadas en Firebase</div>
-    </div>
-  );
-
-  // Detect sesion change for visual separator
-  const prevSesion = step>0?allPreguntas[step-1]?.sesion_id:null;
-  const newSesion = current?.sesion_id !== prevSesion;
-
-  return (
-    <div style={{flex:1,display:"flex",flexDirection:"column"}}>
-      {/* Progress bar */}
-      <div style={{height:3,background:T.surface}}>
-        <div style={{height:"100%",width:`${progress}%`,background:T.grad,transition:"width .4s"}}/>
-      </div>
-
-      {/* Session + question counter */}
-      <div style={{padding:"10px 18px",display:"flex",justifyContent:"space-between",
-        alignItems:"center",borderBottom:`1px solid ${T.border}`}}>
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <span style={{fontSize:10,fontWeight:700,color:T.cyan,
-            background:`${T.cyan}15`,padding:"2px 8px",borderRadius:20}}>
-            Sesión {current?.sesion_id}/{survey.sesiones?.length||1}
-          </span>
-          {newSesion&&step>0&&(
-            <span style={{fontSize:10,color:T.violet,background:`${T.violet}12`,
-              padding:"2px 8px",borderRadius:20,fontWeight:700}}>Nueva sesión</span>
-          )}
-        </div>
-        <span style={{fontSize:11,color:T.textMuted}}>P{step+1}/{total}</span>
-      </div>
-
-      <div style={{flex:1,overflowY:"auto",padding:18}}>
-        {/* Tags */}
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
-          {current?.reglas?.requerido&&(
-            <span style={{fontSize:9,color:T.red,background:`${T.red}12`,
-              padding:"2px 7px",borderRadius:20,fontWeight:700}}>OBLIGATORIA</span>
-          )}
-          {current?.metodologia&&(
-            <span style={{fontSize:9,color:T.violet,background:`${T.violet}12`,
-              padding:"2px 7px",borderRadius:20,fontWeight:700}}>
-              {current.metodologia}
-            </span>
-          )}
-          {current?.reglas?.max_opciones&&(
-            <span style={{fontSize:9,color:T.yellow,background:`${T.yellow}12`,
-              padding:"2px 7px",borderRadius:20,fontWeight:700}}>
-              MÁX {current.reglas.max_opciones}
-            </span>
-          )}
-          {current?.tiempo_max_ms&&(
-            <span style={{fontSize:9,color:T.cyan,background:`${T.cyan}10`,
-              padding:"2px 7px",borderRadius:20,fontWeight:700,
-              display:"flex",alignItems:"center",gap:3}}>
-              <Clock size={8}/> Responde rápido
-            </span>
-          )}
-          {current?.reglas?.salto_logico&&(
-            <span style={{fontSize:9,color:T.textMuted,background:T.elevated,
-              padding:"2px 7px",borderRadius:20,fontWeight:700,
-              border:`1px solid ${T.border}`}}>⚡ Filtro activo</span>
-          )}
-        </div>
-
-        {/* Question */}
-        <div style={{fontSize:16,fontWeight:700,color:T.text,
-          marginBottom:20,lineHeight:1.55}}>
-          {current?.enunciado}
-        </div>
-
-        {/* Conjoint special layout */}
-        {current?.tipo==="conjoint"&&current?.opciones_conjoint?(
-          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
-            {current.opciones_conjoint.map((opt,oi)=>{
-              const selected = resp[currentKey]===`opcion_${oi+1}`;
-              return (
-                <div key={oi} onClick={()=>handleChange(currentKey,`opcion_${oi+1}`,"seleccion_unica")}
-                  style={{padding:"14px 16px",borderRadius:13,cursor:"pointer",transition:"all .2s",
-                    background:selected?`${T.cyan}12`:T.elevated,
-                    border:`2px solid ${selected?T.cyan:T.border}`,
-                    boxShadow:selected?`0 0 0 3px ${T.cyan}10`:"none"}}>
-                  <div style={{fontSize:11,fontWeight:700,color:selected?T.cyan:T.textMuted,
-                    marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-                    Opción {String.fromCharCode(64+oi+1)}
-                  </div>
-                  {typeof opt === "object" ? (
-                    Object.entries(opt).map(([k,v])=>(
-                      <div key={k} style={{display:"flex",justifyContent:"space-between",
-                        fontSize:12,marginBottom:3}}>
-                        <span style={{color:T.textSec}}>{k}</span>
-                        <span style={{color:T.text,fontWeight:600}}>{v}</span>
-                      </div>
-                    ))
-                  ):(
-                    <div style={{fontSize:13,color:T.text}}>{opt}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ):(
-          /* Standard options */
-          <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:20}}>
-            {current?.opciones?.map((opt,oi)=>{
-              const isMulti = current.tipo==="seleccion_multiple";
-              const val = resp[currentKey]||[];
-              const selected = isMulti?val.includes(opt):val===opt;
-              const hasJump = current.reglas?.salto_logico?.[opt];
-              return (
-                <div key={oi}
-                  onClick={()=>handleChange(currentKey,opt,current.tipo)}
-                  style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",
-                    borderRadius:13,cursor:"pointer",transition:"all .15s",
-                    background:selected?`${T.cyan}12`:T.elevated,
-                    border:`2px solid ${selected?T.cyan:T.border}`,
-                    boxShadow:selected?`0 0 0 3px ${T.cyan}08`:"none"}}>
-                  <div style={{width:20,height:20,borderRadius:isMulti?5:"50%",
-                    border:`2px solid ${selected?T.cyan:T.textMuted}`,
-                    background:selected?T.cyan:"transparent",
-                    display:"flex",alignItems:"center",justifyContent:"center",
-                    flexShrink:0,transition:"all .15s"}}>
-                    {selected&&<Check size={11} color="#fff"/>}
-                  </div>
-                  <span style={{fontSize:13,color:T.text,flex:1,lineHeight:1.4}}>{opt}</span>
-                  {hasJump&&(
-                    <span style={{fontSize:9,color:T.red,fontWeight:700,
-                      background:`${T.red}12`,padding:"2px 7px",borderRadius:20}}>
-                      FILTRO
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {errors[currentKey]&&(
-          <div style={{fontSize:11,color:T.red,marginBottom:12,
-            display:"flex",alignItems:"center",gap:5}}>
-            <AlertCircle size={11}/>{errors[currentKey]}
-          </div>
-        )}
-
-        {/* Navigation */}
-        <div style={{display:"flex",gap:9}}>
-          {step>0&&(
-            <button onClick={()=>setStep(s=>s-1)}
-              style={{flex:1,padding:"13px",borderRadius:12,
-                border:`1px solid ${T.border}`,background:T.elevated,
-                color:T.textSec,fontSize:13,fontWeight:600,cursor:"pointer",
-                fontFamily:"inherit",display:"flex",alignItems:"center",
-                justifyContent:"center",gap:5}}>
-              <ArrowLeft size={14}/>Anterior
-            </button>
-          )}
-          {step<total-1?(
-            <button onClick={()=>{if(canAdvance())setStep(s=>s+1);}}
-              disabled={!canAdvance()}
-              style={{flex:2,padding:"13px",borderRadius:12,border:"none",
-                background:canAdvance()?T.grad:T.elevated,
-                color:canAdvance()?"#fff":T.textMuted,fontSize:13,fontWeight:700,
-                cursor:canAdvance()?"pointer":"not-allowed",fontFamily:"inherit",
-                display:"flex",alignItems:"center",justifyContent:"center",gap:5,
-                boxShadow:canAdvance()?"0 4px 14px rgba(6,182,212,0.3)":"none",
-                transition:"all .15s"}}>
-              Siguiente<ArrowRight size={14}/>
-            </button>
-          ):(
-            <button onClick={handleSubmit} disabled={sending}
-              style={{flex:2,padding:"13px",borderRadius:12,border:"none",
-                background:sending?T.elevated:"linear-gradient(135deg,#10B981,#059669)",
-                color:sending?T.textMuted:"#fff",fontSize:13,fontWeight:700,
-                cursor:sending?"not-allowed":"pointer",fontFamily:"inherit",
-                display:"flex",alignItems:"center",justifyContent:"center",gap:5,
-                boxShadow:sending?"none":"0 4px 14px rgba(16,185,129,0.3)",
-                transition:"all .15s"}}>
-              {sending
-                ?<><RefreshCw size={13} style={{animation:"spin 1s linear infinite"}}/>Enviando...</>
-                :<><Send size={13}/>Enviar</>}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// PANTALLA 4: HOME (lista de encuestas asignadas)
-// ═══════════════════════════════════════════════════════════════
-function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEncuesta, onCerrarJornada }) {
-  // Demo survey for testing
-  const DEMO_SURVEY = {
-    encuesta_id: "e4b2a1f0-demo",
-    titulo: "Encuesta de prueba — SurveyAI",
-    sesiones: [
-      {
-        sesion:1, nombre:"Screening inicial",
-        preguntas:[
-          {id:1,tipo:"seleccion_unica",metodologia:"IAT",
-            enunciado:"¿Tiene mascotas actualmente en su hogar?",
-            opciones:["Sí, solo perro","Sí, solo gato","Sí, ambos","No tengo mascotas"],
-            reglas:{requerido:true,salto_logico:{"No tengo mascotas":"FIN_CON_DESCARTE"}}},
-          {id:2,tipo:"seleccion_multiple",metodologia:"Conductual",
-            enunciado:"¿Cuál es su mayor complicación al alimentar sus mascotas?",
-            opciones:["Espacio de almacenamiento","Gasto económico","Riesgo de consumo cruzado","Ninguna"],
-            reglas:{max_opciones:2}},
-        ]
-      },
-      {
-        sesion:2, nombre:"Propuesta de valor",
-        preguntas:[
-          {id:3,tipo:"seleccion_unica",metodologia:"Conjoint",
-            enunciado:"¿Qué certificación le daría más confianza para comprar un alimento unificado?",
-            opciones:["Respaldo de veterinarios","Estudios clínicos","Garantía de palatabilidad"],
-            reglas:{requerido:true}},
-        ]
-      }
-    ]
+// ─── Monitor en vivo ──────────────────────────────────────────
+function MonitorVivo({clientes}) {
+  const stats = {
+    activos: clientes.filter(c=>c.estado==="activo").length,
+    trial: clientes.filter(c=>c.estado==="trial").length,
+    expirados: clientes.filter(c=>c.estado==="expirado").length,
+    total_resp: clientes.reduce((a,c)=>a+c.respuestas,0),
   };
 
   return (
-    <div style={{flex:1,overflowY:"auto",padding:18}}>
-      {/* Jornada info */}
-      <div style={{background:T.card,borderRadius:14,padding:14,
-        border:`1px solid ${T.cyan}18`,marginBottom:18}}>
-        <div style={{fontSize:9,fontWeight:700,color:T.cyan,textTransform:"uppercase",
-          letterSpacing:".07em",marginBottom:8}}>JORNADA ACTIVA</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[
-            ["📍 Comuna", jornada.comuna],
-            ["🏪 Punto", jornada.tipoPunto],
-            ["🕐 Inicio", jornada.hora],
-            ["🛰️ GPS", jornada.gps?`${jornada.gps.lat?.slice(0,8)}...`:"Sin GPS"],
-          ].map(([l,v])=>(
-            <div key={l} style={{background:T.elevated,borderRadius:8,padding:"8px 10px"}}>
-              <div style={{fontSize:9,color:T.textMuted,marginBottom:2}}>{l}</div>
-              <div style={{fontSize:11,color:T.text,fontWeight:600}}>{v}</div>
+    <div style={{padding:20}}>
+      <div style={{fontSize:20,fontWeight:900,color:T.text,marginBottom:4}}>Monitor en vivo</div>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:20}}>
+        <div style={{width:7,height:7,borderRadius:"50%",background:T.green,
+          animation:"pulse 1.5s ease-in-out infinite"}}/>
+        <span style={{fontSize:12,color:T.green,fontWeight:600}}>Sistema operativo</span>
+      </div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:16}}>
+        {[
+          ["Activos",stats.activos,T.green,CheckCircle],
+          ["En Trial",stats.trial,T.yellow,Clock],
+          ["Expirados",stats.expirados,T.orange,AlertCircle],
+          ["Total resp.",stats.total_resp,T.cyan,Activity],
+        ].map(([l,v,c,Icon])=>(
+          <Card key={l} s={{padding:"14px 16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+              <Icon size={14} color={c}/>
+              <div style={{width:6,height:6,borderRadius:"50%",background:c,
+                animation:"pulse 2s ease-in-out infinite"}}/>
             </div>
-          ))}
-        </div>
-        {jornada.nombreLocal&&(
-          <div style={{marginTop:8,fontSize:11,color:T.textSec}}>📌 {jornada.nombreLocal}</div>
-        )}
-      </div>
-
-      {/* Stats del día */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:20}}>
-        {[["Hoy",stats.hoy,T.green],["Total",stats.total,T.cyan],["Descartadas",stats.descartes,T.yellow]].map(([l,v,c])=>(
-          <div key={l} style={{background:T.card,borderRadius:12,padding:"12px 14px",
-            border:`1px solid ${T.border}`}}>
-            <div style={{fontSize:22,fontWeight:900,color:c}}>{v}</div>
-            <div style={{fontSize:10,color:T.textMuted}}>{l}</div>
-          </div>
+            <div style={{fontSize:26,fontWeight:900,color:c}}>{v}</div>
+            <div style={{fontSize:10,color:T.textMuted,marginTop:2}}>{l}</div>
+          </Card>
         ))}
       </div>
 
-      {/* Encuesta asignada */}
-      <div style={{fontSize:10,fontWeight:700,color:T.textMuted,textTransform:"uppercase",
-        letterSpacing:".07em",marginBottom:10}}>Encuesta asignada</div>
+      {/* Activity chart */}
+      <Card s={{marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12}}>
+          Actividad hoy (respuestas/hora)
+        </div>
+        <ResponsiveContainer width="100%" height={100}>
+          <AreaChart data={activityData}>
+            <defs>
+              <linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={T.primary} stopOpacity={.3}/>
+                <stop offset="95%" stopColor={T.primary} stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke={T.border}/>
+            <XAxis dataKey="h" tick={{fill:T.textMuted,fontSize:10}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fill:T.textMuted,fontSize:10}} axisLine={false} tickLine={false}/>
+            <Tooltip contentStyle={{background:T.elevated,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11}}/>
+            <Area type="monotone" dataKey="r" stroke={T.primary} fill="url(#ga)" strokeWidth={2} dot={false}/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </Card>
 
-      <div style={{background:T.card,borderRadius:16,padding:18,
-        border:`1px solid ${T.border}`,marginBottom:14}}>
-        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:3,lineHeight:1.4}}>
-          {DEMO_SURVEY.titulo}
-        </div>
-        <div style={{display:"flex",gap:7,marginBottom:16,flexWrap:"wrap"}}>
-          <span style={{fontSize:10,color:T.cyan,background:`${T.cyan}12`,
-            padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {DEMO_SURVEY.sesiones.length} sesiones
-          </span>
-          <span style={{fontSize:10,color:T.violet,background:`${T.violet}12`,
-            padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {DEMO_SURVEY.sesiones.reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
-          </span>
-          <span style={{fontSize:10,color:T.green,background:`${T.green}12`,
-            padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {stats.hoy} realizadas hoy
-          </span>
-        </div>
-        <button onClick={()=>onIniciarEncuesta(DEMO_SURVEY)}
-          style={{width:"100%",padding:"13px",borderRadius:12,border:"none",
-            background:T.grad,color:"#fff",fontSize:14,fontWeight:700,
-            cursor:"pointer",fontFamily:"inherit",display:"flex",
-            alignItems:"center",justifyContent:"center",gap:7,
-            boxShadow:"0 4px 14px rgba(6,182,212,0.3)"}}>
-          Nueva entrevista <ArrowRight size={15}/>
-        </button>
+      {/* Clientes con trial — con reloj */}
+      {clientes.filter(c=>c.estado==="trial").length > 0 && (
+        <Card>
+          <div style={{fontSize:12,fontWeight:700,color:T.yellow,marginBottom:12}}>
+            ⏱ Trials activos — Tiempo restante
+          </div>
+          {clientes.filter(c=>c.estado==="trial").map(c=>(
+            <div key={c.id} style={{display:"flex",justifyContent:"space-between",
+              alignItems:"center",padding:"10px 0",
+              borderBottom:`1px solid ${T.border}`}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:T.text}}>{c.empresa}</div>
+                <div style={{fontSize:10,color:T.textMuted}}>{c.email}</div>
+              </div>
+              <TrialCountdown expiresAt={c.trialExpiry} compact/>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Clientes ─────────────────────────────────────────────────
+function Clientes({clientes,setClientes}) {
+  const [q,setQ]=useState("");
+  const [sel,setSel]=useState(null);
+  const filtered=clientes.filter(c=>c.empresa.toLowerCase().includes(q.toLowerCase()));
+
+  const toggleEstado=(id,nuevoEstado)=>{
+    setClientes(p=>p.map(c=>c.id===id?{...c,estado:nuevoEstado}:c));
+  };
+
+  return (
+    <div style={{padding:20}}>
+      <div style={{fontSize:20,fontWeight:900,color:T.text,marginBottom:16}}>
+        Clientes — {clientes.length} registrados
       </div>
 
-      <button onClick={onCerrarJornada}
-        style={{width:"100%",padding:"11px",borderRadius:12,
-          border:`1px solid ${T.border}`,background:"transparent",
-          color:T.textMuted,fontSize:13,fontWeight:600,cursor:"pointer",
-          fontFamily:"inherit",display:"flex",alignItems:"center",
-          justifyContent:"center",gap:7}}>
-        <LogOut size={13}/>Cerrar jornada del día
-      </button>
+      <div style={{display:"flex",alignItems:"center",gap:8,background:T.card,
+        border:`1px solid ${T.border}`,borderRadius:10,padding:"8px 13px",marginBottom:14}}>
+        <Search size={13} color={T.textMuted}/>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar cliente..."
+          style={{background:"none",border:"none",outline:"none",color:T.text,
+            fontSize:13,width:"100%",fontFamily:"inherit"}}/>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {filtered.map(c=>(
+          <Card key={c.id} s={{padding:0,overflow:"hidden"}}>
+            <div onClick={()=>setSel(sel?.id===c.id?null:c)}
+              style={{padding:"14px 16px",cursor:"pointer",display:"flex",
+                alignItems:"center",gap:12}}>
+              <div style={{width:36,height:36,borderRadius:9,flexShrink:0,
+                background:T.grad,display:"flex",alignItems:"center",
+                justifyContent:"center",fontSize:12,fontWeight:800,color:"#fff"}}>
+                {c.empresa[0]}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.text,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {c.empresa}
+                </div>
+                <div style={{fontSize:10,color:T.textMuted}}>{c.email}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                <EstadoBadge estado={c.estado}/>
+                {c.estado==="trial"&&c.trialExpiry&&(
+                  <TrialCountdown expiresAt={c.trialExpiry} compact/>
+                )}
+              </div>
+            </div>
+
+            {sel?.id===c.id&&(
+              <div style={{padding:"0 16px 16px",borderTop:`1px solid ${T.border}`}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",
+                  gap:8,marginBottom:12,paddingTop:12}}>
+                  {[["Encuestas",c.encuestas],["Respuestas",c.respuestas],
+                    ["Creado",c.creado],["Plan",c.plan]].map(([l,v])=>(
+                    <div key={l} style={{background:T.elevated,borderRadius:8,
+                      padding:"8px 10px"}}>
+                      <div style={{fontSize:9,color:T.textMuted,marginBottom:2}}>{l}</div>
+                      <div style={{fontSize:12,fontWeight:600,color:T.text}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {c.estado==="trial"&&(
+                    <Btn v="success" sm icon={CheckCircle}
+                      onClick={()=>toggleEstado(c.id,"activo")}>
+                      Activar plan
+                    </Btn>
+                  )}
+                  {c.estado==="activo"&&(
+                    <Btn v="danger" sm icon={Lock}
+                      onClick={()=>toggleEstado(c.id,"desactivado")}>
+                      Suspender
+                    </Btn>
+                  )}
+                  {(c.estado==="expirado"||c.estado==="desactivado")&&(
+                    <Btn v="success" sm icon={Unlock}
+                      onClick={()=>toggleEstado(c.id,"trial")}>
+                      Reactivar trial
+                    </Btn>
+                  )}
+                  <Btn v="ghost" sm icon={Eye}>Ver panel</Btn>
+                </div>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sistema ──────────────────────────────────────────────────
+function Sistema(){
+  const metrics=[
+    {label:"API Anthropic",value:"Operativa",color:T.green,icon:Zap},
+    {label:"Firebase RTDB",value:"Conectado",color:T.green,icon:Database},
+    {label:"Netlify CDN",value:"Activo",color:T.green,icon:Server},
+    {label:"Protocolo Búnker",value:"Blindado",color:T.primary,icon:Shield},
+  ];
+  const logs=[
+    `[${new Date().toLocaleTimeString()}] LOGIN_OK admin@surveyai.cl`,
+    `[${new Date().toLocaleTimeString()}] RESPUESTA_OK encuesta-abc123`,
+    `[${new Date().toLocaleTimeString()}] TOKEN_OK TTL 87s restantes`,
+    `[${new Date().toLocaleTimeString()}] RATE_LIMIT_OK 4/30 req/min`,
+    `[${new Date().toLocaleTimeString()}] FIREBASE_SYNC 3 docs escritos`,
+  ];
+  return (
+    <div style={{padding:20}}>
+      <div style={{fontSize:20,fontWeight:900,color:T.text,marginBottom:16}}>Sistema</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        {metrics.map(m=>(
+          <Card key={m.label} s={{padding:"14px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <m.icon size={13} color={m.color}/>
+              <span style={{fontSize:11,color:T.textSec}}>{m.label}</span>
+            </div>
+            <div style={{fontSize:13,fontWeight:700,color:m.color}}>{m.value}</div>
+          </Card>
+        ))}
+      </div>
+      <Card>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <Terminal size={13} color={T.primary}/>
+          <span style={{fontSize:12,fontWeight:700,color:T.text}}>Logs del agente fantasma</span>
+          <span style={{fontSize:9,color:T.green,background:`${T.green}15`,
+            padding:"2px 7px",borderRadius:20,marginLeft:"auto",fontWeight:700}}>LIVE</span>
+        </div>
+        {logs.map((l,i)=>(
+          <div key={i} style={{fontSize:10,fontFamily:"monospace",color:T.textSec,
+            padding:"5px 9px",background:T.elevated,borderRadius:6,marginBottom:5,
+            border:`1px solid ${T.border}`}}>
+            {l}
+          </div>
+        ))}
+      </Card>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// APP SHELL — CAPA 3
+// APP SHELL — CAPA 5
 // ═══════════════════════════════════════════════════════════════
-export default function Layer3Encuestador({ session, onLogout }) {
-  const [screen, setScreen] = useState("jornada");
-  const [jornada, setJornada] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("sai_jornada")||"null"); } catch { return null; }
-  });
-  const [activeSurvey, setActiveSurvey] = useState(null);
-  const [ficha, setFicha] = useState(null);
-  const [online, setOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(()=>Q.count());
-  const [syncing, setSyncing] = useState(false);
-  const [stats, setStats] = useState(()=>{ Stats.resetHoy(); return Stats.get(); });
+export default function Layer5SuperAdmin({session,onLogout}){
+  const [page,setPage]=useState("monitor");
+  const [clientes,setClientes]=useState(MOCK_CLIENTES);
+  const [col,setCol]=useState(false);
 
-  useEffect(()=>{
-    const on=()=>setOnline(true);
-    const off=()=>setOnline(false);
-    window.addEventListener("online",on);
-    window.addEventListener("offline",off);
-    return()=>{ window.removeEventListener("online",on); window.removeEventListener("offline",off); };
-  },[]);
-
-  useEffect(()=>{ if(jornada) setScreen("home"); },[]);
-
-  const syncQueue = async () => {
-    const q = Q.get();
-    if (!q.length) return;
-    setSyncing(true);
-    for (const item of q) {
-      try { await guardarRespuesta(item); Q.remove(item.local_id); setPendingCount(Q.count()); }
-      catch { break; }
-    }
-    setSyncing(false);
+  const PAGES={
+    monitor:<MonitorVivo clientes={clientes}/>,
+    clientes:<Clientes clientes={clientes} setClientes={setClientes}/>,
+    sistema:<Sistema/>,
+    settings:<div style={{padding:20,color:T.textSec,fontSize:14}}>Configuración SuperAdmin — Próximamente</div>,
   };
-
-  const user = { id: session?.email||"enc-demo", nombre: session?.nombre||"Encuestador",
-    empresa: session?.empresa||"Mi empresa" };
 
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:T.bg,
-      minHeight:"100vh",color:T.text,maxWidth:480,margin:"0 auto",
-      display:"flex",flexDirection:"column"}}>
+      minHeight:"100vh",color:T.text,display:"flex"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        input,button,select{font-family:inherit}
+        button,input{font-family:inherit}
+        ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(99,102,241,0.2);border-radius:2px}
+        @keyframes pulse{0%,100%{opacity:.4;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
         @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
       `}</style>
 
-      {/* Header */}
-      {screen!=="jornada"&&(
-        <div style={{position:"sticky",top:0,zIndex:90,background:T.surface,
-          borderBottom:`1px solid ${T.border}`}}>
-          <div style={{padding:"12px 18px",display:"flex",alignItems:"center",
-            justifyContent:"space-between"}}>
-            <div style={{display:"flex",alignItems:"center",gap:9}}>
-              {(screen==="ficha"||screen==="encuesta")&&(
-                <div onClick={()=>setScreen(screen==="encuesta"?"ficha":"home")}
-                  style={{width:30,height:30,borderRadius:8,cursor:"pointer",
-                    display:"flex",alignItems:"center",justifyContent:"center",
-                    background:T.elevated,color:T.textSec}}>
-                  <ArrowLeft size={14}/>
-                </div>
-              )}
-              <div>
-                <div style={{fontSize:14,fontWeight:800,color:T.text}}>
-                  {screen==="home"?"Mis encuestas":screen==="ficha"?"Ficha del entrevistado":"Encuesta en curso"}
-                </div>
-                <div style={{fontSize:10,color:T.textMuted}}>
-                  {user.nombre} · {jornada?.comuna||""}
-                </div>
-              </div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:7}}>
-              <div style={{display:"flex",alignItems:"center",gap:4,
-                background:online?`${T.green}12`:`${T.red}12`,
-                padding:"3px 9px",borderRadius:20}}>
-                {online?<Wifi size={9} color={T.green}/>:<WifiOff size={9} color={T.red}/>}
-                <span style={{fontSize:9,fontWeight:700,
-                  color:online?T.green:T.red}}>{online?"Online":"Offline"}</span>
-              </div>
-              <div onClick={onLogout}
-                style={{width:28,height:28,borderRadius:7,cursor:"pointer",
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  background:T.elevated,color:T.textMuted}}>
-                <LogOut size={12}/>
-              </div>
-            </div>
+      {/* Sidebar */}
+      <div style={{width:col?60:220,minHeight:"100vh",background:T.surface,
+        borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",
+        position:"fixed",top:0,left:0,bottom:0,zIndex:100,overflow:"hidden",
+        transition:"width .25s cubic-bezier(.4,0,.2,1)"}}>
+        <div style={{padding:"14px 12px",borderBottom:`1px solid ${T.border}`,
+          display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:32,height:32,borderRadius:8,flexShrink:0,
+            background:T.grad,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <Shield size={14} color="#fff"/>
           </div>
-          <OfflineBanner online={online} count={pendingCount}
-            onSync={syncQueue} syncing={syncing}/>
+          {!col&&<div>
+            <div style={{fontSize:12,fontWeight:800,color:T.text}}>SuperAdmin</div>
+            <div style={{fontSize:9,color:T.red,fontWeight:700,letterSpacing:".04em"}}>
+              ⬤ ACCESO RESTRINGIDO
+            </div>
+          </div>}
         </div>
-      )}
+        <nav style={{flex:1,padding:"8px 6px",overflowY:"auto"}}>
+          {NAV.map(item=>{
+            const active=page===item.id;
+            const Icon=item.icon;
+            return (
+              <div key={item.id} onClick={()=>setPage(item.id)}
+                style={{display:"flex",alignItems:"center",gap:8,padding:"8px 9px",
+                  borderRadius:8,marginBottom:2,cursor:"pointer",
+                  background:active?`${T.primary}15`:"transparent",
+                  color:active?T.primary:T.textSec,transition:"all .15s",
+                  borderLeft:`2px solid ${active?T.primary:"transparent"}`}}>
+                <Icon size={15} style={{flexShrink:0}}/>
+                {!col&&<span style={{fontSize:12,fontWeight:active?700:400}}>{item.label}</span>}
+              </div>
+            );
+          })}
+        </nav>
+        <div style={{borderTop:`1px solid ${T.border}`,padding:8}}>
+          <div onClick={onLogout}
+            style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",
+              borderRadius:8,cursor:"pointer",color:T.textSec,fontSize:12,marginBottom:4}}
+            onMouseEnter={e=>{e.currentTarget.style.color=T.red;}}
+            onMouseLeave={e=>{e.currentTarget.style.color=T.textSec;}}>
+            <LogOut size={13}/>{!col&&"Salir"}
+          </div>
+          <div onClick={()=>setCol(!col)}
+            style={{display:"flex",alignItems:"center",justifyContent:col?"center":"flex-end",
+              padding:"5px 8px",cursor:"pointer",color:T.textMuted,borderRadius:7}}
+            onMouseEnter={e=>e.currentTarget.style.color=T.text}
+            onMouseLeave={e=>e.currentTarget.style.color=T.textMuted}>
+            {col?<ChevronRight size={13}/>:<><span style={{fontSize:10}}>Colapsar</span><ChevronLeft size={13} style={{marginLeft:4}}/></>}
+          </div>
+        </div>
+      </div>
 
-      {/* Screens */}
-      {screen==="jornada"&&(
-        <PantallaJornada user={user} onStart={j=>{
-          setJornada(j); setScreen("home");
-        }}/>
-      )}
-
-      {screen==="home"&&jornada&&(
-        <PantallaHome user={user} jornada={jornada} stats={stats}
-          pendingCount={pendingCount} online={online}
-          onIniciarEncuesta={s=>{setActiveSurvey(s);setScreen("ficha");}}
-          onCerrarJornada={()=>{
-            try{localStorage.removeItem("sai_jornada");}catch{}
-            setJornada(null); setScreen("jornada");
-          }}/>
-      )}
-
-      {screen==="ficha"&&activeSurvey&&(
-        <PantallaFicha jornada={jornada}
-          onContinuar={f=>{setFicha(f);setScreen("encuesta");}}
-          onCancelar={()=>setScreen("home")}/>
-      )}
-
-      {screen==="encuesta"&&activeSurvey&&(
-        <PantallaEncuesta
-          survey={activeSurvey} jornada={jornada} ficha={ficha}
-          user={user} online={online}
-          onComplete={(savedOffline)=>{
-            setStats(Stats.get()); setPendingCount(Q.count());
-            setTimeout(()=>{setActiveSurvey(null);setFicha(null);setScreen("home");},savedOffline?400:2400);
-          }}
-          onDiscard={()=>{
-            setStats(Stats.get()); setPendingCount(Q.count());
-            setTimeout(()=>{setActiveSurvey(null);setFicha(null);setScreen("home");},2900);
-          }}/>
-      )}
+      {/* Main */}
+      <div style={{marginLeft:col?60:220,flex:1,minHeight:"100vh",
+        transition:"margin-left .25s cubic-bezier(.4,0,.2,1)"}}>
+        <div style={{height:52,display:"flex",alignItems:"center",justifyContent:"space-between",
+          padding:"0 20px",borderBottom:`1px solid ${T.border}`,background:T.surface,
+          position:"sticky",top:0,zIndex:90}}>
+          <div style={{fontSize:14,fontWeight:700,color:T.text}}>
+            {NAV.find(n=>n.id===page)?.label}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:7}}>
+            <span style={{fontSize:10,fontWeight:700,color:T.red,
+              background:`${T.red}15`,padding:"2px 9px",borderRadius:20,
+              border:`1px solid ${T.red}30`}}>SUPERADMIN</span>
+            <div style={{width:28,height:28,borderRadius:7,background:T.grad,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:10,fontWeight:800,color:"#fff"}}>SA</div>
+          </div>
+        </div>
+        <div style={{overflowY:"auto"}}>{PAGES[page]}</div>
+      </div>
     </div>
   );
 }
