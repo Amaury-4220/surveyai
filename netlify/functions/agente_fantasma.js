@@ -98,72 +98,76 @@ exports.handler = async (event) => {
       case "generar_encuesta": {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503,{error:"IA no configurada"});
-        const { objetivo, sesiones=3, num_preguntas=10 } = datos || {};
+        const { objetivo, sesion_actual=1, sesiones_total=3, encuesta_id="" } = datos || {};
         if (!objetivo || objetivo.length < 10) return res(400,{error:"Describe tu objetivo con más detalle"});
 
-        const objetivoClean = String(objetivo).replace(/<[^>]+>/g,"").replace(/[<>"]/g,"").slice(0,800);
+        const objetivoClean = String(objetivo).replace(/<[^>]+>/g,"").replace(/[<>"]/g,"").slice(0,500);
+        const NOMBRES = ["Screening + IAT","Dolor y comportamiento","Conjoint + Anclaje","Propuesta de valor","Intención de compra"];
+        const sesionNombre = NOMBRES[sesion_actual-1] || `Sesión ${sesion_actual}`;
+        const encId = encuesta_id || `enc-${Date.now().toString(36)}`;
 
-        const system = `Eres un orquestador de investigación de mercado con 5 agentes especializados.
-Genera ÚNICAMENTE JSON válido sin markdown.
+        const instrucciones = {
+          1: "5 preguntas de screening. Incluir salto_logico con FIN_CON_DESCARTE. Tipos: seleccion_unica, iat.",
+          2: "6 preguntas sobre el dolor actual y comportamiento del cliente. Tipos: seleccion_multiple, likert.",
+          3: "5 preguntas conjoint de elección forzada. Agregar opciones_conjoint con 3 objetos comparativos.",
+          4: "5 preguntas de propuesta de valor con anclaje psicológico. Tipos: seleccion_unica, nps.",
+          5: "5 preguntas de intención de compra real. Incluir pregunta sobre lista de espera y depósito.",
+        };
+
+        const system = `Eres experto en investigación de mercado con metodología IAT+Conjoint+Anclaje.
+Genera ÚNICAMENTE JSON válido sin markdown ni texto extra.
+Genera SOLO la sesión ${sesion_actual} de ${sesiones_total}.
 
 ESTRUCTURA EXACTA:
 {
-  "encuesta_id": "uuid-v4",
-  "titulo": "Título del estudio",
-  "objetivo_negocio": "El objetivo descrito",
-  "metodologia": "IAT+Conjoint+Anclaje",
-  "sesiones": [
-    {
-      "sesion": 1,
-      "nombre": "Screening + Asociación Implícita",
-      "descripcion": "...",
-      "preguntas": [
-        {
-          "id": 1,
-          "tipo": "seleccion_unica",
-          "metodologia": "IAT",
-          "enunciado": "...",
-          "opciones": ["A","B","C"],
-          "tiempo_max_ms": 3000,
-          "reglas": {
-            "requerido": true,
-            "salto_logico": {"No aplica": "FIN_CON_DESCARTE"}
-          }
-        }
-      ]
-    }
-  ]
+  "titulo": "Título del estudio de mercado",
+  "sesion": {
+    "sesion": ${sesion_actual},
+    "nombre": "${sesionNombre}",
+    "preguntas": [
+      {
+        "id": 1,
+        "tipo": "seleccion_unica",
+        "metodologia": "IAT",
+        "enunciado": "Pregunta directa y clara",
+        "opciones": ["Opción A","Opción B","Opción C"],
+        "reglas": {"requerido": true}
+      }
+    ]
+  }
 }
 
-SESIONES (${sesiones} en total, ${num_preguntas} preguntas distribuidas):
-1. Screening + IAT (${Math.ceil(num_preguntas/sesiones)} preguntas)
-2. Dolor y comportamiento actual
-3. Experimento Conjoint (elección forzada)
-4. Propuesta de valor + Anclaje
-5. Intención de compra real + Lista de espera
-
-Tipos válidos: seleccion_unica, seleccion_multiple, conjoint, iat, texto_corto, nps, likert
-Para conjoint incluye campo "opciones_conjoint" con 3 opciones comparativas.
-Siempre incluye salto_logico con FIN_CON_DESCARTE en sesión 1.`;
+Instrucciones para esta sesión: ${instrucciones[sesion_actual] || "5 preguntas relevantes."}
+Tipos válidos: seleccion_unica, seleccion_multiple, conjoint, iat, texto_corto, nps, likert.`;
 
         const aiRes = await fetch("https://api.anthropic.com/v1/messages",{
           method:"POST",
           headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","content-type":"application/json"},
           body:JSON.stringify({
             model:"claude-sonnet-4-20250514",
-            max_tokens:2000,
+            max_tokens:1200,
             system,
-            messages:[{role:"user",content:`Objetivo: ${objetivoClean}`}]
+            messages:[{role:"user",content:`Objetivo: ${objetivoClean}. Sesión ${sesion_actual}.`}]
           })
         });
-        if (!aiRes.ok) { log("IA_ERROR",ip,{status:aiRes.status}); return res(502,{error:"Error de IA. Intenta de nuevo."}); }
+
+        if (!aiRes.ok) return res(502,{error:"Error de IA. Intenta de nuevo."});
         const aiData = await aiRes.json();
         const text = aiData.content?.[0]?.text||"";
         const clean = text.replace(/```json|```/g,"").trim();
-        let encuesta;
-        try { encuesta = JSON.parse(clean); } catch { return res(500,{error:"IA generó respuesta inválida"}); }
-        log("IA_OK",ip,{titulo:encuesta.titulo});
-        return res(200,{status:"success",encuesta});
+        let resultado;
+        try { resultado = JSON.parse(clean); } catch { return res(500,{error:"Respuesta inválida de IA"}); }
+
+        log("IA_OK",ip,{sesion:sesion_actual,encId});
+        return res(200,{
+          status:"success",
+          encuesta_id: encId,
+          titulo: resultado.titulo || `Estudio: ${objetivoClean.slice(0,50)}`,
+          objetivo_negocio: objetivoClean,
+          sesion_actual, sesiones_total,
+          sesion: resultado.sesion,
+          es_ultima: sesion_actual >= sesiones_total
+        });
       }
 
       case "registrar_respuesta": {
