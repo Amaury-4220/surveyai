@@ -367,9 +367,29 @@ function IAGeneradora({ onEncuestaCreada }) {
     setAgenteActivo("orquestador");
 
     try {
-      const data = await Bunker.generarEncuesta(objetivo, sesiones, numPreguntas);
-      if (!data) return;
-      setResult(data.encuesta);
+      // Generar sesión por sesión — evita timeout
+      let encuestaId = "";
+      let tituloFinal = "";
+      const sesionesGeneradas = [];
+
+      for (let i = 1; i <= sesiones; i++) {
+        setAgenteActivo(AGENTES[Math.min(i-1, AGENTES.length-1)].id);
+        const res = await bunkerCall("generar_encuesta", {
+          objetivo, sesion_actual: i, sesiones_total: sesiones, encuesta_id: encuestaId
+        });
+        if (!res) return;
+        encuestaId = res.encuesta_id || encuestaId;
+        tituloFinal = res.titulo || tituloFinal;
+        if (res.sesion) sesionesGeneradas.push(res.sesion);
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      setResult({
+        encuesta_id: encuestaId,
+        titulo: tituloFinal,
+        objetivo_negocio: objetivo,
+        sesiones: sesionesGeneradas,
+      });
     } catch(e) {
       setError(e.message === "limite_excedido"
         ? "Límite de generaciones alcanzado. Intenta en 1 hora."
