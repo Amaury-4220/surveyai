@@ -19,7 +19,7 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer,
   XAxis, YAxis, CartesianGrid, Tooltip
 } from "recharts";
-import { Bunker, Session } from "./bunker.js";
+import { bunkerCall, Bunker, Session } from "./bunker.js";
 import { guardarRespuesta, escucharRespuestas, escucharStats, guardarEncuesta, escucharEncuestas } from "./firebase.js";
 
 // ─── Design System ────────────────────────────────────────────
