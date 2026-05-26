@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   LayoutDashboard, FileText, Sparkles, MessageSquare, BarChart3,
   Users, Zap, Settings, LogOut, Menu, X, Bell, Search, Plus,
-  Send, Copy, WhatsApp, ArrowRight, ArrowLeft, RefreshCw,
+  Send, Copy, WhatsApp, ArrowRight, ArrowLeft, RefreshCw, Mail,
   CheckCircle, AlertCircle, Clock, MapPin, Smartphone,
   TrendingUp, Activity, Target, Eye, Edit3, Trash2, Share2,
   Wand2, Download, Filter, ChevronDown, Check, MoreHorizontal,
@@ -333,88 +333,132 @@ function Dashboard({ encuestas, stats }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// IA GENERADORA — Orquestador + 5 Agentes + Pantalla animada
+// IA GENERADORA — Orquestador + 5 Agentes + 50 preguntas
 // ═══════════════════════════════════════════════════════════════
 function IAGeneradora({ onEncuestaCreada }) {
   const [objetivo, setObjetivo] = useState("");
-  const [sesiones, setSesiones] = useState(3);
-  const [fase, setFase] = useState("input"); // input | generando | resultado
+  const [totalPreguntas, setTotalPreguntas] = useState(25);
+  const [fase, setFase] = useState("input");
   const [agenteActivo, setAgenteActivo] = useState(null);
   const [progreso, setProgreso] = useState(0);
   const [preguntasFlotantes, setPreguntasFlotantes] = useState([]);
+  const [sesionesCompletadas, setSesionesCompletadas] = useState([]);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const flotanteIdRef = useRef(0);
+  const [tiempoInicio, setTiempoInicio] = useState(null);
+  const [tiempoTranscurrido, setTiempoTranscurrido] = useState(0);
+  const flotanteId = useRef(0);
+  const timerRef = useRef(null);
+
+  const SESIONES = 5;
+  const PREGUNTAS_POR_SESION = Math.ceil(totalPreguntas / SESIONES);
 
   const AGENTES_INFO = [
-    { id:"ipsos",  name:"IPSOS",  rol:"Psicología conductual",   color:T.cyan,   emoji:"🧠" },
-    { id:"yougov", name:"YouGov", rol:"Perfilado continuo",       color:T.violet, emoji:"👥" },
-    { id:"gallup", name:"Gallup", rol:"Rigor estadístico",        color:T.green,  emoji:"📊" },
-    { id:"kantar", name:"Kantar", rol:"Validación conductual",    color:T.yellow, emoji:"🎯" },
-    { id:"dynata", name:"Dynata", rol:"Anti-fraude + síntesis",   color:T.orange, emoji:"🔒" },
+    { id:"ipsos",  name:"IPSOS",  rol:"Psicología conductual + IAT",  color:T.cyan,   emoji:"🧠" },
+    { id:"yougov", name:"YouGov", rol:"Perfilado + Comportamiento",    color:T.violet, emoji:"👥" },
+    { id:"gallup", name:"Gallup", rol:"Validación + Conjoint",         color:T.green,  emoji:"📊" },
+    { id:"kantar", name:"Kantar", rol:"Anclaje psicológico + Valor",   color:T.yellow, emoji:"🎯" },
+    { id:"dynata", name:"Dynata", rol:"Intención real + Síntesis",     color:T.orange, emoji:"🔒" },
   ];
 
-  const addPreguntaFlotante = (texto) => {
-    const id = ++flotanteIdRef.current;
-    setPreguntasFlotantes(p => [...p.slice(-8), { id, texto, x: 10+Math.random()*70, delay: Math.random()*0.5 }]);
-    setTimeout(() => setPreguntasFlotantes(p => p.filter(q => q.id !== id)), 6000);
+  const addFlotante = (texto) => {
+    const id = ++flotanteId.current;
+    setPreguntasFlotantes(p => [...p.slice(-12), {
+      id, texto,
+      x: 5 + Math.random() * 80,
+      size: 10 + Math.random() * 3,
+      speed: 8 + Math.random() * 6,
+    }]);
+    setTimeout(() => setPreguntasFlotantes(p => p.filter(q => q.id !== id)), 12000);
   };
+
+  useEffect(() => {
+    if (fase === "generando") {
+      setTiempoInicio(Date.now());
+      timerRef.current = setInterval(() => {
+        setTiempoTranscurrido(t => t + 1);
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+      setTiempoTranscurrido(0);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [fase]);
 
   const generate = async () => {
     if (!objetivo.trim() || objetivo.length < 10) {
-      setError("Describe tu idea con más detalle");
+      setError("Describe tu idea con más detalle (mínimo 10 caracteres)");
       return;
     }
     setFase("generando");
     setError(null);
     setProgreso(0);
     setPreguntasFlotantes([]);
+    setSesionesCompletadas([]);
 
     const sesionesGeneradas = [];
-    let encuestaId = "";
+    let encuestaId = `enc-${Date.now().toString(36)}`;
     let tituloFinal = "";
 
-    for (let i = 1; i <= sesiones; i++) {
-      const agente = AGENTES_INFO[Math.min(i-1, AGENTES_INFO.length-1)];
-      setAgenteActivo(agente);
-      setProgreso(Math.round(((i-1)/sesiones)*100));
+    // Tokens que flotan mientras trabaja
+    const TOKENS = [
+      "Analizando comportamiento del consumidor...",
+      "Aplicando metodología IAT...",
+      "Detectando dolores ocultos...",
+      "Calibrando preguntas de screening...",
+      "Procesando datos de mercado...",
+      "Validando representatividad estadística...",
+      "Diseñando experimento Conjoint...",
+      "Calculando precio óptimo psicológico...",
+      "Detectando killer features...",
+      "Estructurando flujo conversacional...",
+      "Aplicando técnica de anclaje...",
+      "Optimizando lógica de saltos...",
+      "Generando preguntas de comportamiento...",
+      "Validando sesgo de deseabilidad social...",
+      "Construyendo perfil psicográfico...",
+    ];
 
-      // Mostrar preguntas flotantes mientras trabaja
-      const tokens = ["Analizando mercado...", "Detectando dolores...", "Calibrando preguntas...",
-        "Aplicando IAT...", "Validando muestra...", "Procesando datos...",
-        "Generando insights...", "Estructurando sesión...", "Optimizando flujo..."];
+    for (let i = 1; i <= SESIONES; i++) {
+      const agente = AGENTES_INFO[i - 1];
+      setAgenteActivo(agente);
+
+      // Tokens flotando continuamente
       let tokenIdx = 0;
       const tokenInterval = setInterval(() => {
-        addPreguntaFlotante(tokens[tokenIdx % tokens.length]);
+        addFlotante(TOKENS[tokenIdx % TOKENS.length]);
         tokenIdx++;
-      }, 800);
+      }, 1200);
 
-      let retries = 3;
+      let retries = 5;
       let sesionData = null;
 
       while (retries > 0 && !sesionData) {
         try {
+          addFlotante(`${agente.emoji} ${agente.name} procesando sesión ${i}...`);
           const res = await bunkerCall("generar_encuesta", {
             objetivo,
             sesion_actual: i,
-            sesiones_total: sesiones,
-            encuesta_id: encuestaId
+            sesiones_total: SESIONES,
+            encuesta_id: encuestaId,
+            preguntas_por_sesion: PREGUNTAS_POR_SESION,
           });
-          if (res?.sesion) {
+          if (res?.sesion?.preguntas?.length > 0) {
             sesionData = res;
             encuestaId = res.encuesta_id || encuestaId;
             tituloFinal = res.titulo || tituloFinal;
             sesionesGeneradas.push(res.sesion);
+            setSesionesCompletadas(p => [...p, i]);
             // Mostrar preguntas reales flotando
-            res.sesion.preguntas?.slice(0,3).forEach((p, pi) => {
-              setTimeout(() => addPreguntaFlotante(p.enunciado?.slice(0,60)+"..."), pi*400);
+            res.sesion.preguntas.forEach((p, pi) => {
+              setTimeout(() => addFlotante("✓ " + (p.enunciado?.slice(0, 55) || "") + "..."), pi * 200);
             });
           }
         } catch(e) {
           retries--;
           if (retries > 0) {
-            addPreguntaFlotante("Reintentando conexión...");
-            await new Promise(r => setTimeout(r, 2000));
+            addFlotante(`⚡ Reconectando... (intento ${5-retries+1})`);
+            await new Promise(r => setTimeout(r, 3000));
           }
         }
       }
@@ -422,185 +466,348 @@ function IAGeneradora({ onEncuestaCreada }) {
       clearInterval(tokenInterval);
 
       if (!sesionData) {
-        setError(`Error en sesión ${i}. Intenta de nuevo.`);
+        setError(`Error en sesión ${i} después de varios intentos. Intenta de nuevo.`);
         setFase("input");
         setAgenteActivo(null);
         return;
       }
 
-      setProgreso(Math.round((i/sesiones)*100));
-      await new Promise(r => setTimeout(r, 500));
+      setProgreso(Math.round((i / SESIONES) * 100));
+      await new Promise(r => setTimeout(r, 600));
     }
 
-    setAgenteActivo(null);
-    setProgreso(100);
-    addPreguntaFlotante("¡Estudio completo!");
+    // Orquestador consolida
+    setAgenteActivo({ name:"Orquestador", rol:"Consolidando análisis final", emoji:"🔮", color:T.cyan });
+    addFlotante("🔮 Orquestador consolidando todos los datos...");
+    await new Promise(r => setTimeout(r, 2000));
 
     const encuestaFinal = {
       encuesta_id: encuestaId,
       titulo: tituloFinal,
       objetivo_negocio: objetivo,
       sesiones: sesionesGeneradas,
+      total_preguntas: sesionesGeneradas.reduce((a,s)=>a+(s.preguntas?.length||0),0),
+      creado_at: new Date().toISOString(),
     };
 
-    await new Promise(r => setTimeout(r, 1500));
     setResult(encuestaFinal);
     setFase("resultado");
+    setAgenteActivo(null);
+    setProgreso(100);
   };
 
-  const guardar = async () => {
+  const publicar = async () => {
     if (!result) return;
     try {
       const id = await guardarEncuesta(result);
-      onEncuestaCreada({ ...result, firebase_id: id });
-      setResult(null); setObjetivo(""); setFase("input"); setProgreso(0);
-    } catch(e) { setError("Error al guardar"); }
+      const encuestaPublicada = { ...result, firebase_id: id, estado: "active" };
+      onEncuestaCreada(encuestaPublicada);
+
+      // Código memorable
+      const ADJETIVOS = ["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
+      const ANIO = new Date().getFullYear();
+      const codigo = `${ADJETIVOS[Math.floor(Math.random()*ADJETIVOS.length)]}-${ANIO}`;
+      const link = `${window.location.origin}/encuestador?enc=${id}`;
+
+      // Mostrar opciones de compartir
+      setResult(prev => ({ ...prev, firebase_id: id, codigo, link, publicada: true }));
+    } catch(e) {
+      setError("Error al publicar. Intenta de nuevo.");
+    }
   };
 
-  // ── Pantalla de generación animada ──
+  const shareWhatsApp = () => {
+    if (!result?.link) return;
+    const msg = encodeURIComponent(
+      `*SurveyAI — ${result.titulo}*\n\n` +
+      `Hola, te asignamos una encuesta de investigación de mercado.\n\n` +
+      `📋 Estudio: *${result.titulo}*\n` +
+      `🔑 Código: *${result.codigo}*\n` +
+      `📊 Preguntas: ${result.total_preguntas}\n\n` +
+      `🔗 Accede aquí:\n${result.link}\n\n` +
+      `_Recuerda declarar tu jornada al iniciar._`
+    );
+    window.open(`https://wa.me/?text=${msg}`, "_blank");
+  };
+
+  const shareEmail = () => {
+    if (!result?.link) return;
+    const subject = encodeURIComponent(`SurveyAI — ${result.titulo}`);
+    const body = encodeURIComponent(
+      `Hola,\n\nTe asignamos la siguiente encuesta de investigación de mercado:\n\n` +
+      `Estudio: ${result.titulo}\n` +
+      `Código: ${result.codigo}\n` +
+      `Total preguntas: ${result.total_preguntas}\n\n` +
+      `Accede aquí: ${result.link}\n\n` +
+      `Recuerda declarar tu jornada (comuna, tipo de punto) al iniciar.\n\n` +
+      `SurveyAI Enterprise\n© 2025`
+    );
+    window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
+  };
+
+  const copyLink = () => {
+    if (!result?.link) return;
+    navigator.clipboard.writeText(result.link).catch(()=>{});
+  };
+
+  // Formato tiempo
+  const formatTiempo = (secs) => {
+    const m = Math.floor(secs/60);
+    const s = secs%60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+
+  // ── Pantalla animada ──
   if (fase === "generando") return (
-    <div style={{padding:24,minHeight:"60vh",display:"flex",flexDirection:"column",
-      alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
+    <div style={{minHeight:"70vh",display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",padding:24,
+      position:"relative",overflow:"hidden",background:T.bg}}>
 
       {/* Preguntas flotantes */}
       <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
         {preguntasFlotantes.map(q=>(
           <div key={q.id} style={{
-            position:"absolute",
-            left:`${q.x}%`,
-            bottom:"-10%",
-            fontSize:11,
-            color:`rgba(6,182,212,${0.3+Math.random()*0.4})`,
-            background:`rgba(6,182,212,0.06)`,
+            position:"absolute", left:`${q.x}%`, bottom:"-5%",
+            fontSize:q.size, color:`rgba(6,182,212,0.6)`,
+            background:"rgba(6,182,212,0.07)",
             border:"1px solid rgba(6,182,212,0.15)",
-            borderRadius:20,
-            padding:"4px 12px",
-            maxWidth:220,
-            whiteSpace:"nowrap",
-            overflow:"hidden",
-            textOverflow:"ellipsis",
-            animation:`floatUp 6s ease-out ${q.delay}s forwards`,
-            zIndex:1,
+            borderRadius:20, padding:"4px 12px",
+            maxWidth:260, whiteSpace:"nowrap",
+            overflow:"hidden", textOverflow:"ellipsis",
+            animation:`floatUp ${q.speed}s ease-out forwards`,
           }}>{q.texto}</div>
         ))}
       </div>
 
-      {/* Centro */}
-      <div style={{textAlign:"center",zIndex:2,position:"relative"}}>
-        {/* Orb animado */}
-        <div style={{position:"relative",width:120,height:120,margin:"0 auto 24px"}}>
+      <div style={{textAlign:"center",zIndex:2,position:"relative",width:"100%",maxWidth:400}}>
+        {/* Orbe */}
+        <div style={{position:"relative",width:130,height:130,margin:"0 auto 20px"}}>
           <div style={{position:"absolute",inset:0,borderRadius:"50%",
-            background:`radial-gradient(circle,${T.cyan}30,transparent 70%)`,
+            background:`radial-gradient(circle,${agenteActivo?.color||T.cyan}35,transparent 70%)`,
             animation:"orbPulse 2s ease-in-out infinite"}}/>
-          <div style={{position:"absolute",inset:8,borderRadius:"50%",
-            border:`2px solid ${T.cyan}40`,animation:"orbSpin 3s linear infinite"}}/>
-          <div style={{position:"absolute",inset:16,borderRadius:"50%",
-            border:`2px dashed ${T.violet}30`,animation:"orbSpin 5s linear infinite reverse"}}/>
+          <div style={{position:"absolute",inset:6,borderRadius:"50%",
+            border:`2px solid ${agenteActivo?.color||T.cyan}50`,
+            animation:"orbSpin 4s linear infinite"}}/>
+          <div style={{position:"absolute",inset:14,borderRadius:"50%",
+            border:`2px dashed ${T.violet}30`,
+            animation:"orbSpin 7s linear infinite reverse"}}/>
+          <div style={{position:"absolute",inset:22,borderRadius:"50%",
+            border:`1px solid ${T.cyan}20`,
+            animation:"orbSpin 10s linear infinite"}}/>
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",
-            justifyContent:"center",fontSize:36}}>
-            {agenteActivo?.emoji||"🧠"}
+            justifyContent:"center",fontSize:44}}>
+            {agenteActivo?.emoji||"🔮"}
           </div>
         </div>
 
-        <div style={{fontSize:18,fontWeight:900,color:T.text,marginBottom:6}}>
-          {agenteActivo ? `Agente ${agenteActivo.name}` : "Orquestador"}
+        <div style={{fontSize:20,fontWeight:900,color:T.text,marginBottom:4}}>
+          {agenteActivo?.name||"Orquestador"}
         </div>
-        <div style={{fontSize:13,color:agenteActivo?.color||T.cyan,marginBottom:20,fontWeight:600}}>
-          {agenteActivo?.rol || "Consolidando análisis..."}
+        <div style={{fontSize:13,color:agenteActivo?.color||T.cyan,
+          fontWeight:600,marginBottom:6}}>
+          {agenteActivo?.rol||"Procesando..."}
+        </div>
+        <div style={{fontSize:11,color:T.textMuted,marginBottom:20}}>
+          ⏱ {formatTiempo(tiempoTranscurrido)} · Generando {totalPreguntas} preguntas de calidad
         </div>
 
-        {/* Progress bar */}
-        <div style={{width:240,height:4,background:T.elevated,borderRadius:4,
-          margin:"0 auto 12px",overflow:"hidden"}}>
-          <div style={{height:"100%",width:`${progreso}%`,background:T.grad,
-            borderRadius:4,transition:"width .6s ease"}}/>
+        {/* Barra de progreso */}
+        <div style={{height:6,background:T.elevated,borderRadius:6,
+          margin:"0 auto 8px",overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${progreso}%`,
+            background:T.grad,borderRadius:6,transition:"width .8s ease"}}/>
         </div>
-        <div style={{fontSize:11,color:T.textMuted}}>{progreso}% completado</div>
+        <div style={{fontSize:11,color:T.textMuted,marginBottom:20}}>
+          {progreso}% · Sesión {sesionesCompletadas.length}/{SESIONES}
+        </div>
 
-        {/* Agentes dots */}
-        <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:20}}>
-          {AGENTES_INFO.slice(0,sesiones).map((a,i)=>{
-            const done = i < AGENTES_INFO.findIndex(x=>x.id===agenteActivo?.id);
+        {/* Agentes */}
+        <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+          {AGENTES_INFO.map((a,i)=>{
+            const done = sesionesCompletadas.includes(i+1);
             const active = agenteActivo?.id === a.id;
             return (
               <div key={a.id} style={{display:"flex",flexDirection:"column",
-                alignItems:"center",gap:4}}>
-                <div style={{width:32,height:32,borderRadius:"50%",
+                alignItems:"center",gap:3}}>
+                <div style={{width:36,height:36,borderRadius:"50%",
                   background:done?`${T.green}20`:active?`${a.color}25`:T.elevated,
                   border:`2px solid ${done?T.green:active?a.color:T.border}`,
                   display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:14,transition:"all .3s",
-                  boxShadow:active?`0 0 12px ${a.color}50`:"none"}}>
-                  {done?"✓":a.emoji}
+                  fontSize:16,transition:"all .4s",
+                  boxShadow:active?`0 0 16px ${a.color}60`:"none"}}>
+                  {done?"✓":active?a.emoji:"○"}
                 </div>
                 <div style={{fontSize:9,color:done?T.green:active?a.color:T.textMuted,
-                  fontWeight:active?700:400}}>{a.name}</div>
+                  fontWeight:active?700:400,textAlign:"center"}}>{a.name}</div>
               </div>
             );
           })}
         </div>
+
+        {sesionesCompletadas.length > 0 && (
+          <div style={{marginTop:16,padding:"8px 14px",background:`${T.green}10`,
+            borderRadius:10,border:`1px solid ${T.green}20`,fontSize:11,color:T.green}}>
+            ✓ {sesionesCompletadas.reduce((a,s)=>{
+              const sesion = sesionesCompletadas.includes(s)?s:0;
+              return a;
+            },0)} sesiones completadas
+            · {sesionesCompletadas.length * PREGUNTAS_POR_SESION} preguntas generadas
+          </div>
+        )}
       </div>
 
       <style>{`
-        @keyframes floatUp{0%{transform:translateY(0);opacity:0}10%{opacity:1}80%{opacity:.8}100%{transform:translateY(-100vh);opacity:0}}
-        @keyframes orbPulse{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.15);opacity:1}}
+        @keyframes floatUp{0%{transform:translateY(0);opacity:0}5%{opacity:1}85%{opacity:.7}100%{transform:translateY(-110vh);opacity:0}}
+        @keyframes orbPulse{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.2);opacity:1}}
         @keyframes orbSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
       `}</style>
     </div>
   );
 
-  // ── Resultado ──
+  // ── Resultado + Publicar ──
   if (fase === "resultado" && result) return (
     <div style={{padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <div>
-          <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:2}}>
-            ✅ Estudio generado
-          </div>
-          <div style={{fontSize:12,color:T.textSec}}>
-            {result.sesiones?.length} sesiones · {result.sesiones?.reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          <Btn v="ghost" icon={RefreshCw} sm onClick={()=>{setFase("input");setResult(null);}}>Regenerar</Btn>
-          <Btn v="green" icon={Check} sm onClick={guardar}>Guardar</Btn>
-        </div>
-      </div>
-
-      <Card>
-        <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:4}}>{result.titulo}</div>
-        <div style={{fontSize:12,color:T.textSec,marginBottom:16}}>{result.objetivo_negocio}</div>
-        {result.sesiones?.map((s,si)=>(
-          <div key={si} style={{marginBottom:10,padding:14,borderRadius:12,
-            background:T.elevated,border:`1px solid ${T.border}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <span style={{fontSize:10,fontWeight:800,color:T.cyan,
-                background:`${T.cyan}15`,padding:"2px 9px",borderRadius:20}}>
-                Sesión {s.sesion}
-              </span>
-              <span style={{fontSize:12,fontWeight:700,color:T.text}}>{s.nombre}</span>
-              <span style={{fontSize:10,color:T.textMuted,marginLeft:"auto"}}>
-                {s.preguntas?.length||0} preguntas
-              </span>
+      {!result.publicada ? (
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",
+            alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:10}}>
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:T.green}}/>
+                <span style={{fontSize:16,fontWeight:800,color:T.text}}>Estudio completo</span>
+              </div>
+              <div style={{fontSize:12,color:T.textSec}}>
+                {result.sesiones?.length} sesiones · {result.total_preguntas} preguntas · {formatTiempo(tiempoTranscurrido)} de generación
+              </div>
             </div>
-            {s.preguntas?.slice(0,2).map((p,pi)=>(
-              <div key={pi} style={{padding:"8px 10px",borderRadius:8,background:T.bg,
-                border:`1px solid ${T.border}`,marginBottom:6,
-                display:"flex",alignItems:"flex-start",gap:8}}>
-                <span style={{fontSize:9,fontWeight:700,color:T.violet,
-                  background:`${T.violet}15`,padding:"2px 7px",borderRadius:20,
-                  flexShrink:0,marginTop:1}}>{p.metodologia||p.tipo}</span>
-                <span style={{fontSize:12,color:T.textSec,flex:1}}>{p.enunciado}</span>
+            <div style={{display:"flex",gap:8}}>
+              <Btn v="ghost" icon={RefreshCw} sm
+                onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}>
+                Regenerar
+              </Btn>
+              <Btn v="green" icon={Send} sm onClick={publicar}>Publicar y compartir</Btn>
+            </div>
+          </div>
+
+          <Card s={{marginBottom:14}}>
+            <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:4}}>
+              {result.titulo}
+            </div>
+            <div style={{fontSize:12,color:T.textSec,marginBottom:16,
+              display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>
+              {result.objetivo_negocio}
+            </div>
+            {result.sesiones?.map((s,si)=>(
+              <div key={si} style={{marginBottom:10,padding:14,borderRadius:12,
+                background:T.elevated,border:`1px solid ${T.border}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <span style={{fontSize:10,fontWeight:800,color:T.cyan,
+                    background:`${T.cyan}15`,padding:"2px 9px",borderRadius:20}}>
+                    Sesión {s.sesion}
+                  </span>
+                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>{s.nombre}</span>
+                  <span style={{fontSize:10,color:T.textMuted,marginLeft:"auto"}}>
+                    {s.preguntas?.length||0} preguntas
+                  </span>
+                </div>
+                {s.preguntas?.map((p,pi)=>(
+                  <div key={pi} style={{padding:"8px 10px",borderRadius:8,background:T.bg,
+                    border:`1px solid ${T.border}`,marginBottom:6,
+                    display:"flex",alignItems:"flex-start",gap:8}}>
+                    <span style={{fontSize:9,fontWeight:700,color:T.violet,
+                      background:`${T.violet}15`,padding:"2px 7px",borderRadius:20,
+                      flexShrink:0,marginTop:1}}>{p.metodologia||p.tipo}</span>
+                    <span style={{fontSize:12,color:T.textSec,flex:1,lineHeight:1.5}}>
+                      {p.enunciado}
+                    </span>
+                  </div>
+                ))}
               </div>
             ))}
-            {(s.preguntas?.length||0)>2&&(
-              <div style={{fontSize:10,color:T.textMuted,textAlign:"center",marginTop:4}}>
-                +{s.preguntas.length-2} preguntas más
+          </Card>
+        </>
+      ) : (
+        /* Publicada — opciones de compartir */
+        <div>
+          <div style={{textAlign:"center",marginBottom:24}}>
+            <div style={{fontSize:48,marginBottom:8}}>🚀</div>
+            <div style={{fontSize:20,fontWeight:900,color:T.green,marginBottom:4}}>
+              ¡Encuesta publicada!
+            </div>
+            <div style={{fontSize:13,color:T.textSec,marginBottom:16}}>
+              {result.titulo}
+            </div>
+            {/* Código memorable */}
+            <div style={{display:"inline-flex",alignItems:"center",gap:10,
+              padding:"12px 24px",background:`${T.cyan}10`,borderRadius:14,
+              border:`1px solid ${T.cyan}30`,marginBottom:8}}>
+              <div>
+                <div style={{fontSize:10,color:T.textMuted,marginBottom:2}}>CÓDIGO DEL ESTUDIO</div>
+                <div style={{fontSize:22,fontWeight:900,color:T.cyan,
+                  fontFamily:"monospace",letterSpacing:".1em"}}>
+                  {result.codigo}
+                </div>
               </div>
-            )}
+            </div>
+            <div style={{fontSize:11,color:T.textMuted,marginBottom:24}}>
+              Comparte este código con tus encuestadores para identificar el estudio
+            </div>
           </div>
-        ))}
-      </Card>
+
+          {/* Link */}
+          <Card s={{marginBottom:16}}>
+            <div style={{fontSize:11,color:T.textMuted,marginBottom:6}}>Link del estudio</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,
+              background:T.bg,borderRadius:9,padding:"9px 13px",
+              border:`1px solid ${T.border}`}}>
+              <span style={{fontSize:11,color:T.textSec,flex:1,
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {result.link}
+              </span>
+              <div onClick={copyLink}
+                style={{cursor:"pointer",color:T.cyan,flexShrink:0}}>
+                <Copy size={13}/>
+              </div>
+            </div>
+          </Card>
+
+          {/* Botones de compartir */}
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <button onClick={shareWhatsApp}
+              style={{width:"100%",padding:"14px",borderRadius:13,border:"none",
+                background:"#25D366",color:"#fff",fontSize:15,fontWeight:700,
+                cursor:"pointer",fontFamily:"inherit",display:"flex",
+                alignItems:"center",justifyContent:"center",gap:9,
+                boxShadow:"0 4px 16px rgba(37,211,102,0.4)"}}>
+              <MessageCircle size={18}/>Compartir por WhatsApp
+            </button>
+            <button onClick={shareEmail}
+              style={{width:"100%",padding:"14px",borderRadius:13,border:"none",
+                background:T.grad,color:"#fff",fontSize:15,fontWeight:700,
+                cursor:"pointer",fontFamily:"inherit",display:"flex",
+                alignItems:"center",justifyContent:"center",gap:9,
+                boxShadow:`0 4px 16px rgba(6,182,212,0.3)`}}>
+              <Mail size={18}/>Compartir por Email
+            </button>
+            <button onClick={copyLink}
+              style={{width:"100%",padding:"13px",borderRadius:13,
+                border:`1px solid ${T.border}`,background:T.elevated,
+                color:T.textSec,fontSize:14,fontWeight:600,
+                cursor:"pointer",fontFamily:"inherit",display:"flex",
+                alignItems:"center",justifyContent:"center",gap:9}}>
+              <Link2 size={16}/>Copiar link
+            </button>
+          </div>
+
+          <div style={{marginTop:14,textAlign:"center"}}>
+            <span onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}
+              style={{fontSize:12,color:T.textMuted,cursor:"pointer",
+                textDecoration:"underline"}}>
+              Crear nueva encuesta
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -609,36 +816,44 @@ function IAGeneradora({ onEncuestaCreada }) {
     <div style={{padding:24}}>
       <div style={{marginBottom:20}}>
         <div style={{fontSize:22,fontWeight:900,color:T.text,marginBottom:3}}>IA Generadora</div>
-        <div style={{fontSize:13,color:T.textMuted}}>5 agentes especializados generan tu estudio</div>
+        <div style={{fontSize:13,color:T.textMuted}}>
+          5 agentes especializados · Metodología IPSOS+Gallup+Kantar · Hasta 50 preguntas
+        </div>
       </div>
 
       <Card s={{marginBottom:16,background:`linear-gradient(135deg,${T.cyan}06,${T.violet}04)`,
         borderColor:`${T.cyan}20`}}>
-        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:12}}>
+        <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:10}}>
           ¿Qué quieres validar en el mercado?
         </div>
         <textarea value={objetivo} onChange={e=>setObjetivo(e.target.value)}
-          placeholder="Describe tu idea o producto. Ej: Tengo un alimento unificado para perros y gatos y quiero validar si hay mercado real..."
-          rows={4}
-          style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,borderRadius:11,
-            padding:"12px 14px",color:T.text,fontSize:13,resize:"vertical",outline:"none",
-            lineHeight:1.7,boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif"}}
+          placeholder="Describe tu idea, producto o servicio. Mientras más detalle des, mejor será el estudio generado.&#10;&#10;Ej: Tengo un alimento unificado para perros y gatos. Quiero saber si hay mercado, cuánto pagarían, qué características valoran más y si lo comprarían hoy."
+          rows={5}
+          style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,
+            borderRadius:11,padding:"12px 14px",color:T.text,fontSize:13,
+            resize:"vertical",outline:"none",lineHeight:1.7,
+            boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif"}}
           onFocus={e=>e.currentTarget.style.borderColor=T.borderHover}
           onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
 
         <div style={{display:"flex",gap:12,marginTop:14,alignItems:"center",flexWrap:"wrap"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:12,color:T.textSec}}>Sesiones:</span>
-            <select value={sesiones} onChange={e=>setSesiones(Number(e.target.value))}
+            <span style={{fontSize:12,color:T.textSec}}>Preguntas:</span>
+            <select value={totalPreguntas} onChange={e=>setTotalPreguntas(Number(e.target.value))}
               style={{background:T.elevated,border:`1px solid ${T.border}`,borderRadius:8,
-                padding:"5px 10px",color:T.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-              {[2,3,4,5].map(n=><option key={n} value={n}>{n} sesiones</option>)}
+                padding:"6px 10px",color:T.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
+              {[5,10,15,20,25,30,35,40,45,50].map(n=>(
+                <option key={n} value={n}>{n} preguntas</option>
+              ))}
             </select>
+          </div>
+          <div style={{fontSize:11,color:T.textMuted}}>
+            ~{Math.ceil(totalPreguntas/5)} por sesión · 5 sesiones · {Math.ceil(totalPreguntas*2/60)} min aprox.
           </div>
           <Btn icon={Sparkles} onClick={generate}
             disabled={!objetivo.trim()||objetivo.length<10}
             s={{marginLeft:"auto"}}>
-            Generar estudio
+            Generar estudio completo
           </Btn>
         </div>
 
@@ -647,18 +862,23 @@ function IAGeneradora({ onEncuestaCreada }) {
             border:`1px solid ${T.red}30`,borderRadius:10,fontSize:12,color:T.red,
             display:"flex",alignItems:"center",gap:7}}>
             <AlertCircle size={13}/>{error}
+            <div onClick={()=>setError(null)} style={{marginLeft:"auto",cursor:"pointer"}}>
+              <X size={12}/>
+            </div>
           </div>
         )}
       </Card>
 
       {/* Agentes preview */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+      <div style={{fontSize:11,fontWeight:700,color:T.textMuted,textTransform:"uppercase",
+        letterSpacing:".07em",marginBottom:10}}>Los 5 agentes que trabajarán en tu estudio</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:9}}>
         {AGENTES_INFO.map(a=>(
-          <div key={a.id} style={{padding:"12px 14px",borderRadius:12,background:T.card,
+          <div key={a.id} style={{padding:"12px 13px",borderRadius:12,background:T.card,
             border:`1px solid ${T.border}`}}>
-            <div style={{fontSize:16,marginBottom:4}}>{a.emoji}</div>
-            <div style={{fontSize:11,fontWeight:700,color:a.color}}>{a.name}</div>
-            <div style={{fontSize:10,color:T.textMuted}}>{a.rol}</div>
+            <div style={{fontSize:18,marginBottom:5}}>{a.emoji}</div>
+            <div style={{fontSize:11,fontWeight:700,color:a.color,marginBottom:2}}>{a.name}</div>
+            <div style={{fontSize:10,color:T.textMuted,lineHeight:1.4}}>{a.rol}</div>
           </div>
         ))}
       </div>
