@@ -11,7 +11,7 @@ import {
   Target, MessageSquare, Award, Layers, Play, Check, X,
   FileText, BarChart3, Search, Lightbulb, Flag
 } from "lucide-react";
-import { Bunker } from "./Layer1_Bunker.js";
+import { Bunker } from "./bunker.js";
 
 // ─── Design System ────────────────────────────────────────────
 const T = {
