@@ -11,7 +11,7 @@ import {
   Smartphone, BarChart3, Activity, Shield, Zap, Eye,
   MessageCircle, Home, ClipboardList, TrendingUp
 } from "lucide-react";
-import { guardarRespuesta } from "../firebase.js";
+import { guardarRespuesta } from "./firebase.js";
 
 // ─── Design System ────────────────────────────────────────────
 const T = {
