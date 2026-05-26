@@ -98,7 +98,7 @@ exports.handler = async (event) => {
       case "generar_encuesta": {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503,{error:"IA no configurada"});
-        const { objetivo, sesiones=5, num_preguntas=50 } = datos || {};
+        const { objetivo, sesiones=3, num_preguntas=10 } = datos || {};
         if (!objetivo || objetivo.length < 10) return res(400,{error:"Describe tu objetivo con más detalle"});
 
         const objetivoClean = String(objetivo).replace(/<[^>]+>/g,"").replace(/[<>"]/g,"").slice(0,800);
@@ -151,7 +151,7 @@ Siempre incluye salto_logico con FIN_CON_DESCARTE en sesión 1.`;
           headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","content-type":"application/json"},
           body:JSON.stringify({
             model:"claude-sonnet-4-20250514",
-            max_tokens:4000,
+            max_tokens:2000,
             system,
             messages:[{role:"user",content:`Objetivo: ${objetivoClean}`}]
           })
