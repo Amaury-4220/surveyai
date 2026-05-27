@@ -95,6 +95,125 @@ exports.handler = async (event) => {
         });
       }
 
+      case "generar_brief": {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) return res(503, { error: "IA no configurada" });
+        const { idea } = datos || {};
+        if (!idea || idea.length < 10) return res(400, { error: "Describe tu idea con más detalle" });
+
+        const ideaClean = String(idea).replace(/<[^>]+>/g, "").replace(/[<>"]/g, "").slice(0, 800);
+
+        const system = `Eres el AGENTE 0 — El Arquitecto de SurveyAI. Eres el mejor diseñador de investigación de mercado del mundo.
+Tu trabajo es analizar la idea de negocio del mandante y crear un BRIEF metodológico preciso que guiará a los 5 agentes especializados.
+
+Responde ÚNICAMENTE con JSON válido. Sin markdown, sin texto extra.
+
+METODOLOGÍAS DISPONIBLES (selecciona las más adecuadas):
+1. Conjoint DCE - simula góndola real con trade-offs
+2. MaxDiff - prioriza atributos sin sesgo
+3. Van Westendorp - precio óptimo (4 preguntas)
+4. Gabor-Granger - curva de demanda exacta
+5. Juster Scale - intención de compra probabilística (0-10)
+6. IAT - asociaciones implícitas rápidas
+7. AIO Psicográfico - estilo de vida y motivaciones
+8. VALS - clasificación por valores y motivaciones
+9. Jobs-to-be-Done - disparadores de compra reales
+10. NPS - lealtad proyectada
+11. CSAT/CES - satisfacción y fricción
+12. Likert Simétrico - acuerdo/desacuerdo balanceado
+13. Diferencial Semántico - perfil emocional de marca
+14. Suma Constante - peso real de atributos
+15. Asociación de Palabras - insights del subconsciente
+16. Frase Incompleta - miedos y motivaciones ocultas
+17. Incidente Crítico - puntos de dolor retrospectivos
+
+ESTRUCTURA JSON:
+{
+  "titulo_estudio": "Nombre descriptivo del estudio",
+  "cliente_objetivo": "Perfil del consumidor objetivo",
+  "objetivo_negocio": "Lo que el mandante quiere validar",
+  "hipotesis_principal": "La hipótesis central a probar",
+  "variables_clave": ["variable1", "variable2", "variable3"],
+  "sesiones": [
+    {
+      "numero": 1,
+      "nombre": "IPSOS — Screening + IAT",
+      "objetivo_sesion": "Filtrar audiencia calificada y detectar asociaciones implícitas",
+      "metodologias": ["IAT", "Jobs-to-be-Done"],
+      "tipos_preguntas": ["seleccion_unica con FIN_CON_DESCARTE", "iat"],
+      "variables_a_medir": ["perfil del comprador", "motivaciones implícitas"],
+      "instruccion_agente": "Genera 10 preguntas de screening usando IAT. La primera DEBE tener FIN_CON_DESCARTE. Detecta el perfil sin revelar el objetivo del estudio."
+    },
+    {
+      "numero": 2,
+      "nombre": "YouGov — Dolor + AIO",
+      "objetivo_sesion": "Mapear el dolor actual y el perfil psicográfico",
+      "metodologias": ["AIO Psicográfico", "Incidente Crítico", "Frase Incompleta"],
+      "tipos_preguntas": ["seleccion_multiple", "likert", "texto_corto"],
+      "variables_a_medir": ["frecuencia del problema", "costo del dolor actual"],
+      "instruccion_agente": "Genera 10 preguntas sobre el comportamiento actual. Usa Frase Incompleta para revelar miedos."
+    },
+    {
+      "numero": 3,
+      "nombre": "Gallup — Validación + Conjoint",
+      "objetivo_sesion": "Validar atributos y disposición de pago con rigor estadístico",
+      "metodologias": ["Conjoint DCE", "MaxDiff", "Van Westendorp"],
+      "tipos_preguntas": ["conjoint", "seleccion_unica"],
+      "variables_a_medir": ["atributos más valorados", "rango de precio aceptable"],
+      "instruccion_agente": "Genera 10 preguntas Conjoint y MaxDiff. Incluir las 4 preguntas de Van Westendorp para precio óptimo."
+    },
+    {
+      "numero": 4,
+      "nombre": "Kantar — Propuesta de Valor",
+      "objetivo_sesion": "Validar propuesta de valor con anclaje psicológico y detectar efecto sospecha",
+      "metodologias": ["Diferencial Semántico", "Suma Constante", "Gabor-Granger"],
+      "tipos_preguntas": ["likert", "seleccion_unica", "nps"],
+      "variables_a_medir": ["killer features", "efecto sospecha en precio bajo"],
+      "instruccion_agente": "Genera 10 preguntas de valor percibido. Usa anclaje con competidor antes de presentar la propuesta nueva."
+    },
+    {
+      "numero": 5,
+      "nombre": "Dynata — Intención Real de Compra",
+      "objetivo_sesion": "Medir intención real con escala Juster y capturar lista de espera",
+      "metodologias": ["Juster Scale", "VALS", "Asociación de Palabras"],
+      "tipos_preguntas": ["seleccion_unica", "texto_corto"],
+      "variables_a_medir": ["probabilidad real de compra", "disposición a depósito reembolsable"],
+      "instruccion_agente": "Genera 10 preguntas de intención real. NO preguntar directamente si compraría. Usar escala Juster (0-10). Incluir pregunta de lista de espera y depósito."
+    }
+  ],
+  "metricas_clave": ["precio_optimo", "intencion_compra", "killer_feature", "perfil_comprador"],
+  "advertencias_metodologicas": ["No revelar el producto hasta la sesión 3", "Aleatorizar opciones en conjoint"],
+  "estructura_skip_logic": "Sesión 1 filtra con FIN_CON_DESCARTE. Sesión 5 cierra con lista de espera."
+}`;
+
+        const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 3000,
+            system,
+            messages: [{ role: "user", content: `Analiza esta idea y genera el brief metodológico: ${ideaClean}` }]
+          })
+        });
+
+        if (!aiRes.ok) return res(502, { error: "Error de IA. Intenta de nuevo." });
+        const aiData = await aiRes.json();
+        const text = aiData.content?.[0]?.text || "";
+        const clean = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
+
+        let brief;
+        try { brief = JSON.parse(clean); }
+        catch { return res(500, { error: "Error generando el brief. Intenta de nuevo." }); }
+
+        log("BRIEF_OK", ip, { titulo: brief.titulo_estudio });
+        return res(200, { status: "success", brief });
+      }
+
       case "generar_encuesta": {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503,{error:"IA no configurada"});
