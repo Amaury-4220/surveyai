@@ -839,7 +839,17 @@ export default function Layer3Encuestador({ session, onLogout }) {
   }, []);
   const [screen, setScreen] = useState("jornada");
   const [jornada, setJornada] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("sai_jornada")||"null"); } catch { return null; }
+    try {
+      // If enc param is in URL, clear previous jornada so new encuesta loads fresh
+      const encParam = new URLSearchParams(window.location.search).get("enc");
+      const savedEnc = localStorage.getItem("sai_jornada_enc");
+      if (encParam && savedEnc !== encParam) {
+        localStorage.removeItem("sai_jornada");
+        localStorage.setItem("sai_jornada_enc", encParam);
+        return null;
+      }
+      return JSON.parse(localStorage.getItem("sai_jornada")||"null");
+    } catch { return null; }
   });
   const [activeSurvey, setActiveSurvey] = useState(null);
   const [ficha, setFicha] = useState(null);
