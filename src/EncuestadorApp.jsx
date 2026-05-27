@@ -703,7 +703,7 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
 // ═══════════════════════════════════════════════════════════════
 // PANTALLA 4: HOME (lista de encuestas asignadas)
 // ═══════════════════════════════════════════════════════════════
-function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEncuesta, onCerrarJornada, encuestaAsignada }) {
+function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsignada, onIniciarEncuesta, onCerrarJornada, encuestaAsignada }) {
   // Use assigned survey from URL if available, otherwise demo
   const DEMO_SURVEY = encuestaAsignada && encuestaAsignada.sesiones?.length > 0
     ? encuestaAsignada
@@ -948,6 +948,7 @@ export default function Layer3Encuestador({ session, onLogout }) {
       {screen==="home"&&jornada&&(
         <PantallaHome user={user} jornada={jornada} stats={stats}
           pendingCount={pendingCount} online={online}
+          encuestaAsignada={encuestaAsignada}
           onIniciarEncuesta={s=>{setActiveSurvey(s);setScreen("ficha");}}
           onCerrarJornada={()=>{
             try{localStorage.removeItem("sai_jornada");}catch{}
