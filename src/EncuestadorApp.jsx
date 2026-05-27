@@ -705,29 +705,8 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
 // ═══════════════════════════════════════════════════════════════
 function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsignada, onIniciarEncuesta, onCerrarJornada }) {
   // Use assigned survey from URL if available, otherwise use demo
-  // Normalize sesiones for length check (Firebase returns object, not array)
-  const sesionesLength = encuestaAsignada?.sesiones
-    ? (Array.isArray(encuestaAsignada.sesiones)
-        ? encuestaAsignada.sesiones.length
-        : Object.keys(encuestaAsignada.sesiones).length)
-    : 0;
-
-  // Normalize sesiones to array for display
-  const encuestaNormalizada = encuestaAsignada && sesionesLength > 0
-    ? {
-        ...encuestaAsignada,
-        sesiones: Array.isArray(encuestaAsignada.sesiones)
-          ? encuestaAsignada.sesiones.map(s=>({...s,
-              preguntas: Array.isArray(s.preguntas)?s.preguntas:Object.values(s.preguntas||{})
-            }))
-          : Object.values(encuestaAsignada.sesiones).map(s=>({...s,
-              preguntas: Array.isArray(s.preguntas)?s.preguntas:Object.values(s.preguntas||{})
-            }))
-      }
-    : null;
-
-  const DEMO_SURVEY = encuestaNormalizada
-    ? encuestaNormalizada
+  const DEMO_SURVEY = encuestaAsignada && encuestaAsignada.sesiones?.length > 0
+    ? encuestaAsignada
     : {
         encuesta_id: "demo-001",
         titulo: "Encuesta de prueba — SurveyAI",
@@ -795,11 +774,11 @@ function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsig
         <div style={{display:"flex",gap:7,marginBottom:16,flexWrap:"wrap"}}>
           <span style={{fontSize:10,color:T.cyan,background:`${T.cyan}12`,
             padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {(DEMO_SURVEY.sesiones||[]).length} sesiones
+            {DEMO_SURVEY.sesiones.length} sesiones
           </span>
           <span style={{fontSize:10,color:T.violet,background:`${T.violet}12`,
             padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {(DEMO_SURVEY.sesiones||[]).reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
+            {DEMO_SURVEY.sesiones.reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
           </span>
           <span style={{fontSize:10,color:T.green,background:`${T.green}12`,
             padding:"2px 9px",borderRadius:20,fontWeight:700}}>
@@ -850,13 +829,42 @@ export default function Layer3Encuestador({ session, onLogout }) {
   }, [encIdFromUrl]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const eqParam = params.get("eq");
+
+    // PRIMARY: load from base64 encoded JSON in URL (guaranteed complete)
+    if (eqParam) {
+      try {
+        const jsonStr = decodeURIComponent(escape(atob(eqParam)));
+        const encuesta = JSON.parse(jsonStr);
+        if (encuesta && encuesta.sesiones) {
+          // Normalize sesiones to arrays
+          const sesionesArr = Array.isArray(encuesta.sesiones)
+            ? encuesta.sesiones
+            : Object.values(encuesta.sesiones);
+          const normalized = {
+            ...encuesta,
+            sesiones: sesionesArr.map(s => ({
+              ...s,
+              preguntas: s.preguntas
+                ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
+                : []
+            }))
+          };
+          setEncuestaAsignada(normalized);
+          setEncLoading(false);
+          return;
+        }
+      } catch(e) {
+        console.log("[SurveyAI] eq param decode error:", e);
+      }
+    }
+
+    // FALLBACK: load from Firebase if only enc= param exists
     if (!encIdFromUrl) { setEncLoading(false); return; }
-    // Use cargarEncuesta which properly normalizes Firebase data
     import("./firebase.js").then(({ cargarEncuesta }) => {
       cargarEncuesta(encIdFromUrl).then(encuesta => {
-        if (encuesta && encuesta.sesiones?.length > 0) {
-          setEncuestaAsignada(encuesta);
-        }
+        if (encuesta) setEncuestaAsignada(encuesta);
         setEncLoading(false);
       }).catch(() => setEncLoading(false));
     }).catch(() => setEncLoading(false));
