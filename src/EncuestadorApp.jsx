@@ -703,8 +703,8 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
 // ═══════════════════════════════════════════════════════════════
 // PANTALLA 4: HOME (lista de encuestas asignadas)
 // ═══════════════════════════════════════════════════════════════
-function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsignada, onIniciarEncuesta, onCerrarJornada, encuestaAsignada }) {
-  // Use assigned survey from URL if available, otherwise demo
+function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsignada, onIniciarEncuesta, onCerrarJornada }) {
+  // Use assigned survey from URL if available, otherwise use demo
   const DEMO_SURVEY = encuestaAsignada && encuestaAsignada.sesiones?.length > 0
     ? encuestaAsignada
     : {
