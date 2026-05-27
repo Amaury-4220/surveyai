@@ -394,36 +394,15 @@ function PantallaFicha({ jornada, onContinuar, onCancelar }) {
 function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, onDiscard }) {
   const initResp = () => {
     const s = {};
-    const normArr = Array.isArray(survey.sesiones)
-      ? survey.sesiones
-      : Object.values(survey.sesiones || {});
-    normArr.forEach(ses => {
-      const pregs = Array.isArray(ses.preguntas)
-        ? ses.preguntas
-        : Object.values(ses.preguntas || {});
-      pregs.forEach(p => {
-        s[`${ses.sesion}_${p.id}`] = p.tipo === "seleccion_multiple" ? [] : "";
-      });
-    });
+    survey.sesiones?.forEach(ses => ses.preguntas?.forEach(p => {
+      s[`${ses.sesion}_${p.id}`] = p.tipo==="seleccion_multiple"?[]:""
+    }));
     return s;
   };
 
-  // Normalize sesiones and preguntas from Firebase (objects or arrays)
-  const normSesiones = (sesiones) => {
-    if (!sesiones) return [];
-    const arr = Array.isArray(sesiones) ? sesiones : Object.values(sesiones);
-    return arr.map(s => ({
-      ...s,
-      preguntas: s.preguntas
-        ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
-        : []
-    }));
-  };
-
-  const sesionesNorm = normSesiones(survey.sesiones);
-  const allPreguntas = sesionesNorm.flatMap(s =>
-    (s.preguntas || []).map(p => ({...p, sesion_id: s.sesion, sesion_nombre: s.nombre}))
-  ).filter(Boolean);
+  const allPreguntas = survey.sesiones?.flatMap(s =>
+    s.preguntas?.map(p => ({...p, sesion_id:s.sesion, sesion_nombre:s.nombre}))
+  ) || [];
 
   const [resp, setResp] = useState(initResp());
   const [step, setStep] = useState(0);
@@ -539,7 +518,7 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
   );
 
   // Detect sesion change for visual separator
-  const prevSesion = step > 0 ? allPreguntas[step-1]?.sesion_id : null;
+  const prevSesion = step>0?allPreguntas[step-1]?.sesion_id:null;
   const newSesion = current?.sesion_id !== prevSesion;
 
   return (
@@ -726,8 +705,29 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
 // ═══════════════════════════════════════════════════════════════
 function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsignada, onIniciarEncuesta, onCerrarJornada }) {
   // Use assigned survey from URL if available, otherwise use demo
-  const DEMO_SURVEY = encuestaAsignada && encuestaAsignada.sesiones?.length > 0
-    ? encuestaAsignada
+  // Normalize sesiones for length check (Firebase returns object, not array)
+  const sesionesLength = encuestaAsignada?.sesiones
+    ? (Array.isArray(encuestaAsignada.sesiones)
+        ? encuestaAsignada.sesiones.length
+        : Object.keys(encuestaAsignada.sesiones).length)
+    : 0;
+
+  // Normalize sesiones to array for display
+  const encuestaNormalizada = encuestaAsignada && sesionesLength > 0
+    ? {
+        ...encuestaAsignada,
+        sesiones: Array.isArray(encuestaAsignada.sesiones)
+          ? encuestaAsignada.sesiones.map(s=>({...s,
+              preguntas: Array.isArray(s.preguntas)?s.preguntas:Object.values(s.preguntas||{})
+            }))
+          : Object.values(encuestaAsignada.sesiones).map(s=>({...s,
+              preguntas: Array.isArray(s.preguntas)?s.preguntas:Object.values(s.preguntas||{})
+            }))
+      }
+    : null;
+
+  const DEMO_SURVEY = encuestaNormalizada
+    ? encuestaNormalizada
     : {
         encuesta_id: "demo-001",
         titulo: "Encuesta de prueba — SurveyAI",
@@ -795,11 +795,11 @@ function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsig
         <div style={{display:"flex",gap:7,marginBottom:16,flexWrap:"wrap"}}>
           <span style={{fontSize:10,color:T.cyan,background:`${T.cyan}12`,
             padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {DEMO_SURVEY.sesiones.length} sesiones
+            {(DEMO_SURVEY.sesiones||[]).length} sesiones
           </span>
           <span style={{fontSize:10,color:T.violet,background:`${T.violet}12`,
             padding:"2px 9px",borderRadius:20,fontWeight:700}}>
-            {DEMO_SURVEY.sesiones.reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
+            {(DEMO_SURVEY.sesiones||[]).reduce((a,s)=>a+(s.preguntas?.length||0),0)} preguntas
           </span>
           <span style={{fontSize:10,color:T.green,background:`${T.green}12`,
             padding:"2px 9px",borderRadius:20,fontWeight:700}}>
