@@ -813,8 +813,9 @@ function PantallaHome({ user, jornada, stats, pendingCount, online, encuestaAsig
 export default function Layer3Encuestador({ session, onLogout }) {
   // Read enc param immediately — before anything else
   const encIdFromUrl = new URLSearchParams(window.location.search).get("enc");
+  const eqParamExists = !!new URLSearchParams(window.location.search).get("eq");
   const [encuestaAsignada, setEncuestaAsignada] = useState(null);
-  const [encLoading, setEncLoading] = useState(!!encIdFromUrl);
+  const [encLoading, setEncLoading] = useState(!!(encIdFromUrl || new URLSearchParams(window.location.search).get("eq")));
 
   // If new enc param arrives, clear old session data so fresh encuesta loads
   useEffect(() => {
@@ -828,12 +829,28 @@ export default function Layer3Encuestador({ session, onLogout }) {
   }, [encIdFromUrl]);
 
   useEffect(() => {
-    if (!encIdFromUrl) return;
+    // Load encuesta from URL base64 param ?eq= (primary)
+    const params = new URLSearchParams(window.location.search);
+    const eqParam = params.get("eq");
+
+    if (eqParam) {
+      try {
+        const jsonStr = decodeURIComponent(escape(atob(eqParam)));
+        const encuesta = JSON.parse(jsonStr);
+        if (encuesta?.sesiones?.length > 0) {
+          setEncuestaAsignada(encuesta);
+          setEncLoading(false);
+          return;
+        }
+      } catch(e) {}
+    }
+
+    // Fallback: load from Firebase if enc= param exists
+    if (!encIdFromUrl) { setEncLoading(false); return; }
     import("./firebase.js").then(({ db, ref, get }) => {
       get(ref(db, `encuestas/${encIdFromUrl}`)).then(snap => {
         if (snap.exists()) {
           const data = snap.val();
-          // Normalize Firebase object arrays
           if (data.sesiones && !Array.isArray(data.sesiones)) {
             data.sesiones = Object.values(data.sesiones).map(s => ({
               ...s,
