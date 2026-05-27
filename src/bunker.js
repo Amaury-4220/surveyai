@@ -29,9 +29,7 @@ export function getDeviceFingerprint() {
 
 // ─── Tamper Detection ─────────────────────────────────────────
 export function detectTampering() {
-  try {
-    if (window.fetch.toString().indexOf("native code") === -1) return true;
-  } catch { return true; }
+  // Disabled - too aggressive on mobile browsers
   return false;
 }
 
