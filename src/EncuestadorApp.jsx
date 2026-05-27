@@ -816,6 +816,17 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [encuestaAsignada, setEncuestaAsignada] = useState(null);
   const [encLoading, setEncLoading] = useState(!!encIdFromUrl);
 
+  // If new enc param arrives, clear old session data so fresh encuesta loads
+  useEffect(() => {
+    if (!encIdFromUrl) return;
+    const lastEnc = localStorage.getItem("sai_last_enc");
+    if (lastEnc !== encIdFromUrl) {
+      // New encuesta assigned — clear jornada cache
+      localStorage.removeItem("sai_jornada");
+      localStorage.setItem("sai_last_enc", encIdFromUrl);
+    }
+  }, [encIdFromUrl]);
+
   useEffect(() => {
     if (!encIdFromUrl) return;
     import("./firebase.js").then(({ db, ref, get }) => {
@@ -840,6 +851,15 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [screen, setScreen] = useState("jornada");
   const [jornada, setJornada] = useState(()=>{
     try {
+      // If new enc in URL, always clear jornada to load fresh encuesta
+      if (encIdFromUrl) {
+        const lastEnc = localStorage.getItem("sai_last_enc");
+        if (lastEnc !== encIdFromUrl) {
+          localStorage.removeItem("sai_jornada");
+          localStorage.setItem("sai_last_enc", encIdFromUrl);
+          return null;
+        }
+      }
       return JSON.parse(localStorage.getItem("sai_jornada")||"null");
     } catch { return null; }
   });
