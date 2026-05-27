@@ -764,13 +764,12 @@ function PantallaHome({ user, jornada, encuesta, stats, pendingCount, online, on
             Sin encuesta asignada — abre un link de encuesta para comenzar
           </div>
         )}
-        <button onClick={onIniciar} disabled={!encuesta}
+        <button onClick={onIniciar}
           style={{width:"100%",padding:"13px",borderRadius:12,border:"none",
-            background:encuesta?T.grad:T.elevated,
-            color:encuesta?"#fff":T.textMuted,fontSize:14,fontWeight:700,
-            cursor:encuesta?"pointer":"not-allowed",fontFamily:"inherit",
+            background:T.grad,color:"#fff",fontSize:14,fontWeight:700,
+            cursor:"pointer",fontFamily:"inherit",
             display:"flex",alignItems:"center",justifyContent:"center",gap:7,
-            boxShadow:encuesta?"0 4px 14px rgba(6,182,212,0.3)":"none"}}>
+            boxShadow:"0 4px 14px rgba(6,182,212,0.3)"}}>
           Nueva entrevista <ArrowRight size={15}/>
         </button>
       </div>
@@ -792,7 +791,19 @@ function PantallaHome({ user, jornada, encuesta, stats, pendingCount, online, on
 // ═══════════════════════════════════════════════════════════════
 export default function Layer3Encuestador({ session, onLogout }) {
   // 1. Decodificar encuesta del link PRIMERO
-  const [encuesta] = useState(() => decodeEncuesta());
+  const [encuesta] = useState(() => {
+    const decoded = decodeEncuesta();
+    if (decoded) return decoded;
+    // Check legacy enc= param - show placeholder
+    const encId = new URLSearchParams(window.location.search).get("enc");
+    if (encId) return {
+      encuesta_id: encId,
+      titulo: "Cargando encuesta...",
+      sesiones: [],
+      _legacy: true,
+    };
+    return null;
+  });
   const [screen, setScreen] = useState(() => {
     // Si hay encuesta nueva, limpiar jornada anterior
     if (encuesta) {
@@ -815,6 +826,19 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [pendingCount, setPendingCount] = useState(() => Q.count());
   const [syncing, setSyncing] = useState(false);
   const [stats, setStats] = useState(() => { Stats.resetHoy?.(); return Stats.get(); });
+
+  // Load legacy enc= from Firebase if no eq= param
+  const [encuestaActiva, setEncuestaActiva] = useState(encuesta && !encuesta._legacy ? encuesta : null);
+  useEffect(() => {
+    if (!encuesta?._legacy) return;
+    import("./firebase.js").then(({ cargarEncuesta }) => {
+      cargarEncuesta(encuesta.encuesta_id).then(enc => {
+        if (enc) setEncuestaActiva(enc);
+      }).catch(() => {});
+    }).catch(() => {});
+  }, []);
+
+  const encuestaFinal = encuestaActiva || (encuesta && !encuesta._legacy ? encuesta : null);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -906,12 +930,12 @@ export default function Layer3Encuestador({ session, onLogout }) {
 
       {/* Screens */}
       {screen === "jornada" && (
-        <PantallaJornada user={user} encuesta={encuesta}
+        <PantallaJornada user={user} encuesta={encuestaFinal}
           onStart={j => { setJornada(j); setScreen("home"); }}/>
       )}
 
       {screen === "home" && jornada && (
-        <PantallaHome user={user} jornada={jornada} encuesta={encuesta}
+        <PantallaHome user={user} jornada={jornada} encuesta={encuestaFinal}
           stats={stats} pendingCount={pendingCount} online={online}
           onIniciar={() => setScreen("ficha")}
           onCerrarJornada={() => {
@@ -926,9 +950,9 @@ export default function Layer3Encuestador({ session, onLogout }) {
           onCancelar={() => setScreen("home")}/>
       )}
 
-      {screen === "encuesta" && encuesta && (
+      {screen === "encuesta" && (
         <PantallaEncuesta
-          encuesta={encuesta} jornada={jornada} ficha={ficha}
+          encuesta={encuestaFinal} jornada={jornada} ficha={ficha}
           user={user} online={online}
           onComplete={offline => {
             setStats(Stats.get()); setPendingCount(Q.count());
