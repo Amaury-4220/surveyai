@@ -704,24 +704,27 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
 // PANTALLA 4: HOME (lista de encuestas asignadas)
 // ═══════════════════════════════════════════════════════════════
 function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEncuesta, onCerrarJornada, encuestaAsignada }) {
-  const DEMO_SURVEY = encuestaAsignada || {
-    encuesta_id: "demo-001",
-    titulo: "Encuesta de prueba — SurveyAI",
-    sesiones: [
-      { sesion:1, nombre:"Screening inicial",
-        preguntas:[
-          {id:1,tipo:"seleccion_unica",metodologia:"IAT",
-            enunciado:"¿Tiene mascotas actualmente en su hogar?",
-            opciones:["Sí, solo perro","Sí, solo gato","Sí, ambos","No tengo mascotas"],
-            reglas:{requerido:true,salto_logico:{"No tengo mascotas":"FIN_CON_DESCARTE"}}},
-          {id:2,tipo:"seleccion_multiple",metodologia:"Conductual",
-            enunciado:"¿Cuál es su mayor complicación al alimentar sus mascotas?",
-            opciones:["Espacio de almacenamiento","Gasto económico","Riesgo de consumo cruzado","Ninguna"],
-            reglas:{max_opciones:2}},
+  // Use assigned survey from URL if available, otherwise demo
+  const DEMO_SURVEY = encuestaAsignada && encuestaAsignada.sesiones?.length > 0
+    ? encuestaAsignada
+    : {
+        encuesta_id: "demo-001",
+        titulo: "Encuesta de prueba — SurveyAI",
+        sesiones: [
+          { sesion:1, nombre:"Screening inicial",
+            preguntas:[
+              {id:1,tipo:"seleccion_unica",metodologia:"IAT",
+                enunciado:"¿Tiene mascotas actualmente en su hogar?",
+                opciones:["Sí, solo perro","Sí, solo gato","Sí, ambos","No tengo mascotas"],
+                reglas:{requerido:true,salto_logico:{"No tengo mascotas":"FIN_CON_DESCARTE"}}},
+              {id:2,tipo:"seleccion_multiple",metodologia:"Conductual",
+                enunciado:"¿Cuál es su mayor complicación al alimentar sus mascotas?",
+                opciones:["Espacio de almacenamiento","Gasto económico","Riesgo de consumo cruzado","Ninguna"],
+                reglas:{max_opciones:2}},
+            ]
+          }
         ]
-      }
-    ]
-  };
+      };
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:18}}>
@@ -808,30 +811,31 @@ function PantallaHome({ user, jornada, stats, pendingCount, online, onIniciarEnc
 // APP SHELL — CAPA 3
 // ═══════════════════════════════════════════════════════════════
 export default function Layer3Encuestador({ session, onLogout }) {
+  // Read enc param immediately — before anything else
+  const encIdFromUrl = new URLSearchParams(window.location.search).get("enc");
   const [encuestaAsignada, setEncuestaAsignada] = useState(null);
+  const [encLoading, setEncLoading] = useState(!!encIdFromUrl);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const encId = params.get("enc");
-    if (encId) {
-      import("./firebase.js").then(({ db, ref, get }) => {
-        get(ref(db, `encuestas/${encId}`)).then(snap => {
-          if (snap.exists()) {
-            const data = snap.val();
-            // Normalize sesiones — Firebase stores arrays as objects
-            if (data.sesiones && !Array.isArray(data.sesiones)) {
-              data.sesiones = Object.values(data.sesiones).map(s => ({
-                ...s,
-                preguntas: s.preguntas
-                  ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
-                  : []
-              }));
-            }
-            setEncuestaAsignada({ firebase_id: encId, ...data });
+    if (!encIdFromUrl) return;
+    import("./firebase.js").then(({ db, ref, get }) => {
+      get(ref(db, `encuestas/${encIdFromUrl}`)).then(snap => {
+        if (snap.exists()) {
+          const data = snap.val();
+          // Normalize Firebase object arrays
+          if (data.sesiones && !Array.isArray(data.sesiones)) {
+            data.sesiones = Object.values(data.sesiones).map(s => ({
+              ...s,
+              preguntas: s.preguntas
+                ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
+                : []
+            }));
           }
-        }).catch(() => {});
-      }).catch(() => {});
-    }
+          setEncuestaAsignada({ firebase_id: encIdFromUrl, ...data });
+        }
+        setEncLoading(false);
+      }).catch(() => setEncLoading(false));
+    }).catch(() => setEncLoading(false));
   }, []);
   const [screen, setScreen] = useState("jornada");
   const [jornada, setJornada] = useState(()=>{
