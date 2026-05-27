@@ -528,12 +528,18 @@ function IAGeneradora({ onEncuestaCreada }) {
         })) || []
       };
 
-      const link = `${window.location.origin}/encuestador?enc=${id}`;
+      // Save to Firebase and get real ID
+      let firebaseId = null;
+      try { 
+        firebaseId = await guardarEncuesta({ ...encuestaData, estado: "active" });
+      } catch(fbErr) { 
+        console.error("Firebase error:", fbErr); 
+      }
 
-      // Also save to Firebase for backup
-      try { await guardarEncuesta({ ...encuestaData, estado: "active" }); } catch {}
+      const finalId = firebaseId || encuestaData.encuesta_id;
+      const link = `${window.location.origin}/encuestador?enc=${finalId}`;
 
-      onEncuestaCreada({ ...encuestaData, estado: "active" });
+      onEncuestaCreada({ ...encuestaData, firebase_id: firebaseId, estado: "active" });
       setResult(prev => ({ ...prev, codigo, link, publicada: true }));
 
     } catch(e) {
