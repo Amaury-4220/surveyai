@@ -657,27 +657,57 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
     try{
       const ADJS=["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
       const codigo=`${ADJS[Math.floor(Math.random()*ADJS.length)]}-${new Date().getFullYear()}`;
+
+      // Build clean encuesta object
       const data={
-        encuesta_id:result.encuesta_id, titulo:result.titulo,
-        cliente:result.cliente||"", objetivo_negocio:result.objetivo_negocio,
-        codigo, creado_at:new Date().toISOString(),
+        encuesta_id:result.encuesta_id,
+        titulo:result.titulo,
+        cliente:result.cliente||"",
+        objetivo_negocio:result.objetivo_negocio,
+        codigo,
+        creado_at:new Date().toISOString(),
         total_preguntas:result.total_preguntas,
-        sesiones:(result.sesiones||[]).map(s=>({
-          sesion:s.sesion,nombre:s.nombre||"",metodologia:s.metodologia||"",
-          preguntas:(s.preguntas||[]).map(p=>({
-            id:p.id,tipo:p.tipo||"seleccion_unica",metodologia:p.metodologia||"",
-            enunciado:p.enunciado||"",opciones:p.opciones||[],
-            reglas:p.reglas||{requerido:true},
+        sesiones:(result.sesiones||[]).map((s,si)=>({
+          sesion: s.sesion||si+1,
+          nombre: s.nombre||"",
+          metodologia: s.metodologia||"",
+          preguntas:(s.preguntas||[]).map((p,pi)=>({
+            id: p.id||pi+1,
+            tipo: p.tipo||"seleccion_unica",
+            metodologia: p.metodologia||"",
+            enunciado: p.enunciado||"",
+            opciones: Array.isArray(p.opciones)?p.opciones:[],
+            opciones_conjoint: p.opciones_conjoint||undefined,
+            reglas: {
+              requerido: p.reglas?.requerido||false,
+              salto_logico: p.reglas?.salto_logico||undefined,
+              max_opciones: p.reglas?.max_opciones||undefined,
+            },
           }))
         }))
       };
+
+      // Save to Firebase for analytics (backup)
       let fbId=null;
-      try{ fbId=await guardarEncuesta({...data,estado:"active"}); }catch(e){ console.error("Firebase:",e); }
-      const link=`${window.location.origin}/encuestador?enc=${fbId||data.encuesta_id}`;
+      try{ fbId=await guardarEncuesta({...data,estado:"active"}); }
+      catch(e){ console.error("Firebase backup error:",e); }
+
+      // Encode full encuesta in URL — no Firebase dependency for loading
+      const jsonStr = JSON.stringify(data);
+      const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
+
+      // Use short Firebase ID if available, fallback to encoded data
+      const link = fbId
+        ? `${window.location.origin}/encuestador?enc=${fbId}&eq=${encoded}`
+        : `${window.location.origin}/encuestador?eq=${encoded}`;
+
       onEncuestaCreada({...data,firebase_id:fbId,estado:"active"});
       setResult(prev=>({...prev,codigo,link,publicada:true}));
-    }catch(e){ setError("Error al publicar. Intenta de nuevo."); }
-    finally{ setPublicando(false); }
+
+    }catch(e){
+      console.error("[SurveyAI] Error publicar:",e);
+      setError("Error al publicar. Intenta de nuevo.");
+    }finally{ setPublicando(false); }
   };
 
   const copyLink = () => {
