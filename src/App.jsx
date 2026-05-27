@@ -528,10 +528,7 @@ function IAGeneradora({ onEncuestaCreada }) {
         })) || []
       };
 
-      // Encode encuesta in URL (base64)
-      const jsonStr = JSON.stringify(encuestaData);
-      const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
-      const link = `${window.location.origin}/encuestador?eq=${b64}`;
+      const link = `${window.location.origin}/encuestador?enc=${id}`;
 
       // Also save to Firebase for backup
       try { await guardarEncuesta({ ...encuestaData, estado: "active" }); } catch {}
