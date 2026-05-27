@@ -829,37 +829,12 @@ export default function Layer3Encuestador({ session, onLogout }) {
   }, [encIdFromUrl]);
 
   useEffect(() => {
-    // Load encuesta from URL base64 param ?eq= (primary)
-    const params = new URLSearchParams(window.location.search);
-    const eqParam = params.get("eq");
-
-    if (eqParam) {
-      try {
-        const jsonStr = decodeURIComponent(escape(atob(eqParam)));
-        const encuesta = JSON.parse(jsonStr);
-        if (encuesta?.sesiones?.length > 0) {
-          setEncuestaAsignada(encuesta);
-          setEncLoading(false);
-          return;
-        }
-      } catch(e) {}
-    }
-
-    // Fallback: load from Firebase if enc= param exists
     if (!encIdFromUrl) { setEncLoading(false); return; }
-    import("./firebase.js").then(({ db, ref, get }) => {
-      get(ref(db, `encuestas/${encIdFromUrl}`)).then(snap => {
-        if (snap.exists()) {
-          const data = snap.val();
-          if (data.sesiones && !Array.isArray(data.sesiones)) {
-            data.sesiones = Object.values(data.sesiones).map(s => ({
-              ...s,
-              preguntas: s.preguntas
-                ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
-                : []
-            }));
-          }
-          setEncuestaAsignada({ firebase_id: encIdFromUrl, ...data });
+    // Use cargarEncuesta which properly normalizes Firebase data
+    import("./firebase.js").then(({ cargarEncuesta }) => {
+      cargarEncuesta(encIdFromUrl).then(encuesta => {
+        if (encuesta && encuesta.sesiones?.length > 0) {
+          setEncuestaAsignada(encuesta);
         }
         setEncLoading(false);
       }).catch(() => setEncLoading(false));
