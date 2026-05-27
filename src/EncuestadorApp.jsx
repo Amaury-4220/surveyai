@@ -840,14 +840,6 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [screen, setScreen] = useState("jornada");
   const [jornada, setJornada] = useState(()=>{
     try {
-      // If enc param is in URL, clear previous jornada so new encuesta loads fresh
-      const encParam = new URLSearchParams(window.location.search).get("enc");
-      const savedEnc = localStorage.getItem("sai_jornada_enc");
-      if (encParam && savedEnc !== encParam) {
-        localStorage.removeItem("sai_jornada");
-        localStorage.setItem("sai_jornada_enc", encParam);
-        return null;
-      }
       return JSON.parse(localStorage.getItem("sai_jornada")||"null");
     } catch { return null; }
   });
@@ -867,6 +859,13 @@ export default function Layer3Encuestador({ session, onLogout }) {
   },[]);
 
   useEffect(()=>{ if(jornada) setScreen("home"); },[]);
+  
+  // When encuestaAsignada loads from Firebase, update PantallaHome
+  useEffect(()=>{
+    if(encuestaAsignada) {
+      console.log("[SurveyAI] Encuesta lista:", encuestaAsignada.titulo);
+    }
+  },[encuestaAsignada]);
 
   const syncQueue = async () => {
     const q = Q.get();
@@ -881,6 +880,17 @@ export default function Layer3Encuestador({ session, onLogout }) {
 
   const user = { id: session?.email||"enc-demo", nombre: session?.nombre||"Encuestador",
     empresa: session?.empresa||"Mi empresa" };
+
+  // Loading screen while Firebase loads the encuesta
+  if (encLoading) return (
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{"@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}"}</style>
+      <div style={{width:40,height:40,border:`2px solid ${T.cyan}`,borderTopColor:"transparent",
+        borderRadius:"50%",animation:"spin 1s linear infinite",marginBottom:12}}/>
+      <div style={{fontSize:12,color:T.textMuted}}>Cargando encuesta asignada...</div>
+    </div>
+  );
 
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:T.bg,
