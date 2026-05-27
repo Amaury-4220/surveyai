@@ -4,7 +4,7 @@
 // ╚══════════════════════════════════════════════════════════════╝
 
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, push, onValue, off, query, orderByChild, limitToLast } from "firebase/database";
+import { getDatabase, ref, push, get, onValue, off, query, orderByChild, limitToLast } from "firebase/database";
 
 // Credenciales desde variables de entorno — nunca hardcodeadas
 const firebaseConfig = {
@@ -61,13 +61,64 @@ export async function guardarRespuesta(payload) {
 // ─── ESCRITURA — Guardar encuesta generada por IA ─────
 export async function guardarEncuesta(encuesta, mandante_id = "demo") {
   const encuestasRef = ref(db, "encuestas");
+
+  // Serialize sesiones as plain objects (Firebase doesn't support nested arrays well)
+  const sesionesSerializadas = (encuesta.sesiones || []).reduce((acc, s, i) => {
+    acc[i] = {
+      sesion: s.sesion || i+1,
+      nombre: s.nombre || "",
+      metodologia: s.metodologia || "",
+      preguntas: (s.preguntas || []).reduce((pacc, p, j) => {
+        pacc[j] = {
+          id: p.id || j+1,
+          tipo: p.tipo || "seleccion_unica",
+          metodologia: p.metodologia || "",
+          enunciado: p.enunciado || "",
+          opciones: p.opciones || [],
+          reglas: p.reglas || { requerido: true },
+        };
+        if (p.opciones_conjoint) pacc[j].opciones_conjoint = p.opciones_conjoint;
+        if (p.tiempo_max_ms) pacc[j].tiempo_max_ms = p.tiempo_max_ms;
+        return pacc;
+      }, {}),
+    };
+    return acc;
+  }, {});
+
   const nueva = await push(encuestasRef, {
-    ...encuesta,
+    encuesta_id: encuesta.encuesta_id || "",
+    titulo: encuesta.titulo || "",
+    objetivo_negocio: (encuesta.objetivo_negocio || "").slice(0, 500),
+    codigo: encuesta.codigo || "",
+    total_preguntas: encuesta.total_preguntas || 0,
     mandante_id,
     creado_at: new Date().toISOString(),
     estado: "active",
+    sesiones: sesionesSerializadas,
   });
   return nueva.key;
+}
+
+// ─── LECTURA — Cargar encuesta por ID con normalización ──
+export async function cargarEncuesta(firebaseId) {
+  const snap = await get(ref(db, `encuestas/${firebaseId}`));
+  if (!snap.exists()) return null;
+  const data = snap.val();
+
+  // Normalize sesiones from Firebase object to array
+  const sesiones = data.sesiones
+    ? Object.values(data.sesiones).map(s => ({
+        ...s,
+        preguntas: s.preguntas
+          ? Object.values(s.preguntas).map(p => ({
+              ...p,
+              opciones: Array.isArray(p.opciones) ? p.opciones : Object.values(p.opciones || {}),
+            }))
+          : []
+      }))
+    : [];
+
+  return { firebase_id: firebaseId, ...data, sesiones };
 }
 
 // ─── LECTURA — Escuchar respuestas en tiempo real ─────
