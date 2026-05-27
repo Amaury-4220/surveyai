@@ -7,9 +7,9 @@ import {
   LayoutDashboard, FileText, Sparkles, MessageSquare, BarChart3,
   Users, Settings, LogOut, Menu, X, Bell, Search, Plus,
   Send, ArrowRight, ArrowLeft, RefreshCw, Mail, Copy,
-  CheckCircle, AlertCircle, Clock, Eye, Trash2,
+  CheckCircle, AlertCircle, Clock, Eye, Trash2, Edit3,
   Wand2, Download, ChevronDown, Check,
-  Link2, MessageCircle, Shield, ChevronRight, BarChart2, Users2
+  Link2, MessageCircle, Shield, ChevronRight, BarChart2, Users2, Layers
 } from "lucide-react";
 import { Activity } from "lucide-react";
 import {
@@ -32,6 +32,7 @@ const T = {
 const NAV = [
   { id:"dashboard",    label:"Dashboard",      icon:LayoutDashboard },
   { id:"encuestas",    label:"Mis encuestas",  icon:FileText },
+  { id:"arquitecto",   label:"Arquitecto",     icon:Layers },
   { id:"ia",           label:"IA Generadora",  icon:Sparkles },
   { id:"respuestas",   label:"Respuestas",     icon:MessageSquare },
   { id:"encuestadores",label:"Encuestadores",  icon:Users },
@@ -264,13 +265,313 @@ function Dashboard({ encuestas, stats, setPage }) {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// AGENTE 0 — EL ARQUITECTO
+// Genera el brief metodológico antes de los 5 agentes
+// ═══════════════════════════════════════════════════════════════
+function Arquitecto({ onBriefAprobado }) {
+  const [idea, setIdea] = useState("");
+  const [fase, setFase] = useState("input"); // input | generando | brief
+  const [brief, setBrief] = useState(null);
+  const [error, setError] = useState(null);
+  const [editando, setEditando] = useState(false);
+  const [briefEditado, setBriefEditado] = useState("");
+  const [escuchando, setEscuchando] = useState(false);
+  const reconRef = useRef(null);
+
+  // ── Voz ──
+  const toggleVoz = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setError("Tu navegador no soporta entrada por voz"); return; }
+    if (escuchando) {
+      reconRef.current?.stop();
+      setEscuchando(false);
+      return;
+    }
+    const r = new SR();
+    r.lang = "es-CL"; r.continuous = true; r.interimResults = true;
+    r.onresult = e => {
+      const txt = Array.from(e.results).map(r=>r[0].transcript).join("");
+      setIdea(txt);
+    };
+    r.onend = () => setEscuchando(false);
+    r.onerror = () => setEscuchando(false);
+    reconRef.current = r;
+    r.start();
+    setEscuchando(true);
+  };
+
+  const generar = async () => {
+    if (!idea.trim() || idea.length < 10) { setError("Describe tu idea (mínimo 10 caracteres)"); return; }
+    setFase("generando"); setError(null);
+    try {
+      const data = await bunkerCall("generar_brief", { idea });
+      if (!data?.brief) throw new Error("Sin brief");
+      setBrief(data.brief);
+      setBriefEditado(JSON.stringify(data.brief, null, 2));
+      setFase("brief");
+    } catch(e) {
+      setError("Error generando el brief. Intenta de nuevo.");
+      setFase("input");
+    }
+  };
+
+  const enviarAlOrquestador = () => {
+    if (!brief) return;
+    // Build objetivo from brief for the 5 agents
+    const objetivo = `${brief.objetivo_negocio}. Hipótesis: ${brief.hipotesis_principal}. Variables: ${(brief.variables_clave||[]).join(", ")}.`;
+    onBriefAprobado({ brief, objetivo, instrucciones: brief.sesiones });
+  };
+
+  if (fase === "generando") return (
+    <div style={{padding:24,display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",minHeight:"50vh",textAlign:"center"}}>
+      <div style={{width:70,height:70,borderRadius:"50%",
+        background:`radial-gradient(circle,${T.violet}35,transparent 70%)`,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        fontSize:32,marginBottom:16,animation:"orbPulse 2s ease-in-out infinite"}}>
+        🏛️
+      </div>
+      <div style={{fontSize:18,fontWeight:800,color:T.text,marginBottom:6}}>
+        Agente 0 — El Arquitecto
+      </div>
+      <div style={{fontSize:13,color:T.violet,marginBottom:20}}>
+        Analizando tu idea y seleccionando metodologías...
+      </div>
+      <div style={{fontSize:11,color:T.textMuted}}>
+        DCE · MaxDiff · Van Westendorp · IAT · Juster · VALS · AIO...
+      </div>
+      <style>{"@keyframes orbPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}"}</style>
+    </div>
+  );
+
+  if (fase === "brief" && brief) return (
+    <div style={{padding:isMobile?16:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontSize:16}}>🏛️</span>
+            <span style={{fontSize:16,fontWeight:800,color:T.text}}>Brief metodológico listo</span>
+          </div>
+          <div style={{fontSize:12,color:T.textSec}}>
+            Revisa y edita antes de enviarlo al orquestador
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <Btn v="ghost" icon={ArrowLeft} sm onClick={()=>{setFase("input");setBrief(null);}}>Volver</Btn>
+          <Btn v="ghost" icon={Edit3} sm onClick={()=>setEditando(!editando)}>
+            {editando?"Ver normal":"Editar JSON"}
+          </Btn>
+          <Btn v="green" icon={Send} sm onClick={enviarAlOrquestador}>
+            Enviar al Orquestador →
+          </Btn>
+        </div>
+      </div>
+
+      {editando ? (
+        <Card s={{marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:10}}>
+            Editar brief (JSON)
+          </div>
+          <textarea value={briefEditado}
+            onChange={e=>{
+              setBriefEditado(e.target.value);
+              try{ setBrief(JSON.parse(e.target.value)); }catch{}
+            }}
+            rows={20}
+            style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,
+              borderRadius:10,padding:"12px 14px",color:T.text,fontSize:11,
+              fontFamily:"monospace",outline:"none",boxSizing:"border-box",resize:"vertical"}}/>
+        </Card>
+      ) : (
+        <>
+          {/* Resumen ejecutivo */}
+          <Card s={{marginBottom:14,background:`linear-gradient(135deg,${T.violet}06,${T.cyan}04)`,borderColor:`${T.violet}20`}}>
+            <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:6}}>{brief.titulo_estudio}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+              {[
+                ["🎯 Objetivo",brief.objetivo_negocio],
+                ["💡 Hipótesis",brief.hipotesis_principal],
+                ["👤 Audiencia",brief.cliente_objetivo],
+                ["📊 Métricas",brief.metricas_clave?.join(", ")],
+              ].map(([l,v])=>(
+                <div key={l} style={{background:T.elevated,borderRadius:9,padding:"10px 12px"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:T.textMuted,marginBottom:3}}>{l}</div>
+                  <div style={{fontSize:12,color:T.text,lineHeight:1.5}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            {brief.advertencias_metodologicas?.length>0&&(
+              <div style={{padding:"8px 12px",background:`${T.yellow}10`,borderRadius:8,
+                border:`1px solid ${T.yellow}25`}}>
+                <div style={{fontSize:10,fontWeight:700,color:T.yellow,marginBottom:4}}>
+                  ⚠️ ADVERTENCIAS METODOLÓGICAS
+                </div>
+                {brief.advertencias_metodologicas.map((a,i)=>(
+                  <div key={i} style={{fontSize:11,color:T.textSec}}>• {a}</div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* Sesiones planificadas */}
+          <div style={{fontSize:11,fontWeight:700,color:T.textMuted,textTransform:"uppercase",
+            letterSpacing:".07em",marginBottom:10}}>Plan de sesiones</div>
+          {brief.sesiones?.map((s,i)=>{
+            const COLORES=[T.cyan,T.violet,T.green,T.yellow,T.orange];
+            const c=COLORES[i%5];
+            return (
+              <Card key={i} s={{marginBottom:10,borderLeft:`3px solid ${c}`}}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                  <div style={{width:32,height:32,borderRadius:8,background:`${c}20`,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:13,fontWeight:900,color:c,flexShrink:0}}>
+                    {s.numero}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:3}}>{s.nombre}</div>
+                    <div style={{fontSize:11,color:T.textSec,marginBottom:8}}>{s.objetivo_sesion}</div>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+                      {s.metodologias?.map((m,j)=>(
+                        <span key={j} style={{fontSize:10,fontWeight:700,color:c,
+                          background:`${c}12`,padding:"2px 8px",borderRadius:20,
+                          border:`1px solid ${c}25`}}>{m}</span>
+                      ))}
+                    </div>
+                    <div style={{fontSize:11,color:T.textMuted,background:T.elevated,
+                      borderRadius:8,padding:"8px 10px",border:`1px solid ${T.border}`}}>
+                      <strong style={{color:T.textSec}}>Instrucción:</strong> {s.instruccion_agente}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+
+          {/* CTA */}
+          <div style={{marginTop:20,padding:20,background:`${T.green}08`,borderRadius:14,
+            border:`1px solid ${T.green}25`,textAlign:"center"}}>
+            <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:6}}>
+              ¿El brief está correcto?
+            </div>
+            <div style={{fontSize:12,color:T.textSec,marginBottom:16}}>
+              Puedes editarlo o enviarlo directamente a los 5 agentes
+            </div>
+            <Btn icon={Send} onClick={enviarAlOrquestador} s={{padding:"12px 32px",fontSize:14}}>
+              Enviar al Orquestador → Generar cuestionario
+            </Btn>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  // ── Input ──
+  return (
+    <div style={{padding:isMobile?16:24}}>
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+          <span style={{fontSize:24}}>🏛️</span>
+          <div style={{fontSize:22,fontWeight:900,color:T.text}}>Arquitecto del Estudio</div>
+        </div>
+        <div style={{fontSize:13,color:T.textMuted}}>
+          Describe tu idea · El Agente 0 selecciona las metodologías correctas · Los 5 agentes generan el cuestionario
+        </div>
+      </div>
+
+      <Card s={{marginBottom:16,background:`linear-gradient(135deg,${T.violet}06,${T.cyan}04)`,
+        borderColor:`${T.violet}20`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:14,fontWeight:700,color:T.text}}>
+            Describe tu idea de negocio
+          </div>
+          <button onClick={toggleVoz}
+            style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",
+              borderRadius:20,border:`1px solid ${escuchando?T.red:T.violet}30`,
+              background:escuchando?`${T.red}15`:`${T.violet}12`,
+              color:escuchando?T.red:T.violet,fontSize:12,fontWeight:700,
+              cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+            {escuchando?"🔴 Detener":"🎙️ Dictar idea"}
+          </button>
+        </div>
+
+        {escuchando&&(
+          <div style={{padding:"8px 12px",background:`${T.red}10`,borderRadius:8,
+            border:`1px solid ${T.red}20`,marginBottom:10,fontSize:11,color:T.red,
+            display:"flex",alignItems:"center",gap:6}}>
+            <div style={{width:7,height:7,borderRadius:"50%",background:T.red,
+              animation:"pulse 1s ease-in-out infinite"}}/>
+            Escuchando... habla con claridad
+          </div>
+        )}
+
+        <textarea value={idea} onChange={e=>setIdea(e.target.value)} rows={6}
+          placeholder="Ej: Tengo un alimento unificado para perros y gatos. Quiero saber si hay mercado, cuánto pagarían, cuáles son las características más valoradas y si la gente lo compraría hoy mismo o se inscribiría en una lista de espera.&#10;&#10;También quiero saber si el precio de $29.990 les parece razonable o genera desconfianza."
+          style={{width:"100%",background:T.bg,border:`1.5px solid ${T.border}`,
+            borderRadius:11,padding:"12px 14px",color:T.text,fontSize:13,
+            resize:"vertical",outline:"none",lineHeight:1.7,
+            boxSizing:"border-box",fontFamily:"inherit"}}
+          onFocus={e=>e.currentTarget.style.borderColor=T.violet+"80"}
+          onBlur={e=>e.currentTarget.style.borderColor=T.border}/>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:14}}>
+          <div style={{fontSize:11,color:T.textMuted}}>
+            {idea.length} caracteres · {idea.length>=10?"✓ Listo":"Mínimo 10"}
+          </div>
+          <Btn icon={Wand2} onClick={generar}
+            disabled={!idea.trim()||idea.length<10}>
+            Generar brief metodológico
+          </Btn>
+        </div>
+
+        {error&&<div style={{marginTop:12,padding:"10px 14px",background:`${T.red}12`,
+          border:`1px solid ${T.red}30`,borderRadius:10,fontSize:12,color:T.red,
+          display:"flex",alignItems:"center",gap:7}}>
+          <AlertCircle size={13}/>{error}
+          <div onClick={()=>setError(null)} style={{marginLeft:"auto",cursor:"pointer"}}><X size={12}/></div>
+        </div>}
+      </Card>
+
+      {/* Las 20 metodologías disponibles */}
+      <div style={{fontSize:11,fontWeight:700,color:T.textMuted,textTransform:"uppercase",
+        letterSpacing:".07em",marginBottom:10}}>Metodologías disponibles para el Arquitecto</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8}}>
+        {[
+          ["🎯","Conjoint DCE","Simula góndola real",T.cyan],
+          ["📊","MaxDiff","Prioriza sin sesgo",T.cyan],
+          ["💰","Van Westendorp","Precio óptimo",T.green],
+          ["📈","Gabor-Granger","Curva de demanda",T.green],
+          ["🎲","Juster Scale","Intención probabilística",T.green],
+          ["⚡","IAT","Asociaciones implícitas",T.violet],
+          ["🧬","AIO Psicográfico","Estilo de vida",T.violet],
+          ["🧠","VALS","Valores y motivaciones",T.violet],
+          ["🔨","Jobs-to-be-Done","Disparadores reales",T.yellow],
+          ["❤️","NPS / CSAT / CES","Lealtad y fricción",T.yellow],
+          ["📝","Likert + Diferencial","Acuerdo y perfil",T.orange],
+          ["💭","Proyectivas","Miedos del subconsciente",T.orange],
+        ].map(([emoji,nombre,desc,c])=>(
+          <div key={nombre} style={{padding:"10px 12px",borderRadius:10,background:T.card,
+            border:`1px solid ${T.border}`,display:"flex",gap:8,alignItems:"flex-start"}}>
+            <span style={{fontSize:16,flexShrink:0}}>{emoji}</span>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:c}}>{nombre}</div>
+              <div style={{fontSize:10,color:T.textMuted}}>{desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // IA GENERADORA — Campo cliente + nombre + animación
 // ═══════════════════════════════════════════════════════════════
-function IAGeneradora({ onEncuestaCreada }) {
+function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
   const [cliente, setCliente] = useState("");
   const [nombreEstudio, setNombreEstudio] = useState("");
-  const [objetivo, setObjetivo] = useState("");
+  const [objetivo, setObjetivo] = useState(briefArquitecto?.objetivo || "");
   const [totalPreguntas, setTotalPreguntas] = useState(25);
   const [fase, setFase] = useState("input");
   const [agenteActivo, setAgenteActivo] = useState(null);
@@ -1061,6 +1362,7 @@ export default function Layer2Mandante({ session, onLogout }) {
   const [mobile, setMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [encuestas, setEncuestas] = useState([]);
+  const [briefActivo, setBriefActivo] = useState(null);
   const [stats, setStats] = useState({total:0,completadas:0,descartes:0,hoy:0});
 
   isMobile = mobile;
@@ -1078,7 +1380,8 @@ export default function Layer2Mandante({ session, onLogout }) {
 
   const PAGES = {
     dashboard:    <Dashboard encuestas={encuestas} stats={stats} setPage={setPage}/>,
-    ia:           <IAGeneradora onEncuestaCreada={e=>setEncuestas(p=>[e,...p])}/>,
+    arquitecto:   <Arquitecto onBriefAprobado={b=>{setBriefActivo(b);setPage("ia");}}/>,
+    ia:           <IAGeneradora onEncuestaCreada={e=>setEncuestas(p=>[e,...p])} briefArquitecto={briefActivo}/>,
     encuestas:    <MisEncuestas encuestas={encuestas} session={session}/>,
     respuestas:   <Respuestas stats={stats}/>,
     encuestadores:<Encuestadores session={session}/>,
@@ -1086,7 +1389,7 @@ export default function Layer2Mandante({ session, onLogout }) {
     settings:     <SettingsPage session={session}/>,
   };
 
-  const TITLES = {dashboard:"Dashboard",ia:"IA Generadora",encuestas:"Mis encuestas",
+  const TITLES = {dashboard:"Dashboard",arquitecto:"Arquitecto del Estudio",ia:"IA Generadora",encuestas:"Mis encuestas",
     respuestas:"Respuestas",encuestadores:"Encuestadores",analiticas:"Analíticas",settings:"Configuración"};
 
   return (
