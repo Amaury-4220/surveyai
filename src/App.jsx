@@ -497,42 +497,63 @@ function IAGeneradora({ onEncuestaCreada }) {
   };
 
   const [publicando, setPublicando] = useState(false);
+
   const publicar = async () => {
     if (!result || publicando) return;
     setPublicando(true);
     setError(null);
     try {
-      // Serialize sesiones safely for Firebase
-      const encuestaParaGuardar = {
-        ...result,
+      const ADJETIVOS = ["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
+      const codigo = `${ADJETIVOS[Math.floor(Math.random()*ADJETIVOS.length)]}-${new Date().getFullYear()}`;
+
+      // Serialize encuesta to JSON
+      const encuestaData = {
+        encuesta_id: result.encuesta_id,
+        titulo: result.titulo,
+        objetivo_negocio: result.objetivo_negocio,
+        codigo,
+        creado_at: new Date().toISOString(),
         sesiones: result.sesiones?.map(s => ({
-          ...s,
-          preguntas: s.preguntas?.map(p => ({
-            id: p.id || 0,
+          sesion: s.sesion,
+          nombre: s.nombre || "",
+          metodologia: s.metodologia || "",
+          preguntas: (s.preguntas || []).map(p => ({
+            id: p.id,
             tipo: p.tipo || "seleccion_unica",
             metodologia: p.metodologia || "",
             enunciado: p.enunciado || "",
             opciones: p.opciones || [],
             reglas: p.reglas || { requerido: true },
-          })) || []
+          }))
         })) || []
       };
 
-      const id = await guardarEncuesta(encuestaParaGuardar);
-      if (!id) throw new Error("No se obtuvo ID de Firebase");
+      // Encode encuesta in URL (base64)
+      const jsonStr = JSON.stringify(encuestaData);
+      const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
+      const link = `${window.location.origin}/encuestador?eq=${b64}`;
 
-      const ADJETIVOS = ["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
-      const codigo = `${ADJETIVOS[Math.floor(Math.random()*ADJETIVOS.length)]}-${new Date().getFullYear()}`;
-      const link = `${window.location.origin}/encuestador?enc=${id}`;
+      // Also save to Firebase for backup
+      try { await guardarEncuesta({ ...encuestaData, estado: "active" }); } catch {}
 
-      onEncuestaCreada({ ...encuestaParaGuardar, firebase_id: id, estado: "active" });
-      setResult(prev => ({ ...prev, firebase_id: id, codigo, link, publicada: true }));
+      onEncuestaCreada({ ...encuestaData, estado: "active" });
+      setResult(prev => ({ ...prev, codigo, link, publicada: true }));
+
     } catch(e) {
       console.error("[SurveyAI] Error publicar:", e);
-      setError(`Error al publicar: ${e.message}. Intenta de nuevo.`);
+      setError("Error al publicar. Intenta de nuevo.");
     } finally {
       setPublicando(false);
     }
+  };
+
+  const descargarJSON = () => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `encuesta-${result.encuesta_id || "surveyai"}.json`;
+    a.click();
   };
 
   const shareWhatsApp = () => {
@@ -724,7 +745,7 @@ function IAGeneradora({ onEncuestaCreada }) {
                 onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}>
                 Regenerar
               </Btn>
-              <Btn v="green" icon={Send} sm onClick={publicar} loading={publicando}>Publicar</Btn>
+              <Btn v="green" icon={Send} sm onClick={publicar}>Publicar</Btn>
             </div>
           </div>
 
