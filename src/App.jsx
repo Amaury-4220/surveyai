@@ -496,23 +496,42 @@ function IAGeneradora({ onEncuestaCreada }) {
     setProgreso(100);
   };
 
+  const [publicando, setPublicando] = useState(false);
   const publicar = async () => {
-    if (!result) return;
+    if (!result || publicando) return;
+    setPublicando(true);
+    setError(null);
     try {
-      const id = await guardarEncuesta(result);
-      const encuestaPublicada = { ...result, firebase_id: id, estado: "active" };
-      onEncuestaCreada(encuestaPublicada);
+      // Serialize sesiones safely for Firebase
+      const encuestaParaGuardar = {
+        ...result,
+        sesiones: result.sesiones?.map(s => ({
+          ...s,
+          preguntas: s.preguntas?.map(p => ({
+            id: p.id || 0,
+            tipo: p.tipo || "seleccion_unica",
+            metodologia: p.metodologia || "",
+            enunciado: p.enunciado || "",
+            opciones: p.opciones || [],
+            reglas: p.reglas || { requerido: true },
+          })) || []
+        })) || []
+      };
 
-      // Código memorable
+      const id = await guardarEncuesta(encuestaParaGuardar);
+      if (!id) throw new Error("No se obtuvo ID de Firebase");
+
       const ADJETIVOS = ["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
-      const ANIO = new Date().getFullYear();
-      const codigo = `${ADJETIVOS[Math.floor(Math.random()*ADJETIVOS.length)]}-${ANIO}`;
+      const codigo = `${ADJETIVOS[Math.floor(Math.random()*ADJETIVOS.length)]}-${new Date().getFullYear()}`;
       const link = `${window.location.origin}/encuestador?enc=${id}`;
 
-      // Mostrar opciones de compartir
+      onEncuestaCreada({ ...encuestaParaGuardar, firebase_id: id, estado: "active" });
       setResult(prev => ({ ...prev, firebase_id: id, codigo, link, publicada: true }));
     } catch(e) {
-      setError("Error al publicar. Intenta de nuevo.");
+      console.error("[SurveyAI] Error publicar:", e);
+      setError(`Error al publicar: ${e.message}. Intenta de nuevo.`);
+    } finally {
+      setPublicando(false);
     }
   };
 
@@ -705,7 +724,7 @@ function IAGeneradora({ onEncuestaCreada }) {
                 onClick={()=>{setFase("input");setResult(null);setSesionesCompletadas([]);}}>
                 Regenerar
               </Btn>
-              <Btn v="green" icon={Send} sm onClick={publicar}>Publicar</Btn>
+              <Btn v="green" icon={Send} sm onClick={publicar} loading={publicando}>Publicar</Btn>
             </div>
           </div>
 
