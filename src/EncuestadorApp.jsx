@@ -394,15 +394,36 @@ function PantallaFicha({ jornada, onContinuar, onCancelar }) {
 function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, onDiscard }) {
   const initResp = () => {
     const s = {};
-    survey.sesiones?.forEach(ses => ses.preguntas?.forEach(p => {
-      s[`${ses.sesion}_${p.id}`] = p.tipo==="seleccion_multiple"?[]:""
-    }));
+    const normArr = Array.isArray(survey.sesiones)
+      ? survey.sesiones
+      : Object.values(survey.sesiones || {});
+    normArr.forEach(ses => {
+      const pregs = Array.isArray(ses.preguntas)
+        ? ses.preguntas
+        : Object.values(ses.preguntas || {});
+      pregs.forEach(p => {
+        s[`${ses.sesion}_${p.id}`] = p.tipo === "seleccion_multiple" ? [] : "";
+      });
+    });
     return s;
   };
 
-  const allPreguntas = survey.sesiones?.flatMap(s =>
-    s.preguntas?.map(p => ({...p, sesion_id:s.sesion, sesion_nombre:s.nombre}))
-  ) || [];
+  // Normalize sesiones and preguntas from Firebase (objects or arrays)
+  const normSesiones = (sesiones) => {
+    if (!sesiones) return [];
+    const arr = Array.isArray(sesiones) ? sesiones : Object.values(sesiones);
+    return arr.map(s => ({
+      ...s,
+      preguntas: s.preguntas
+        ? (Array.isArray(s.preguntas) ? s.preguntas : Object.values(s.preguntas))
+        : []
+    }));
+  };
+
+  const sesionesNorm = normSesiones(survey.sesiones);
+  const allPreguntas = sesionesNorm.flatMap(s =>
+    (s.preguntas || []).map(p => ({...p, sesion_id: s.sesion, sesion_nombre: s.nombre}))
+  ).filter(Boolean);
 
   const [resp, setResp] = useState(initResp());
   const [step, setStep] = useState(0);
@@ -518,7 +539,7 @@ function PantallaEncuesta({ survey, jornada, ficha, user, online, onComplete, on
   );
 
   // Detect sesion change for visual separator
-  const prevSesion = step>0?allPreguntas[step-1]?.sesion_id:null;
+  const prevSesion = step > 0 ? allPreguntas[step-1]?.sesion_id : null;
   const newSesion = current?.sesion_id !== prevSesion;
 
   return (
