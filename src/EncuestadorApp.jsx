@@ -261,34 +261,40 @@ function PantallaEncuesta({ encuesta, jornada, ficha, user, online, onComplete, 
 
   // ── AGENTE LOCAL: construye lista plana de preguntas ─────────
   const todasLasPreguntas = (() => {
-    if (!encuesta?.sesiones) return [];
-    const lista = [];
-    const sesiones = Array.isArray(encuesta.sesiones)
-      ? encuesta.sesiones
-      : Object.values(encuesta.sesiones || {});
-    sesiones.forEach(s => {
-      const pregs = Array.isArray(s.preguntas)
-        ? s.preguntas
-        : Object.values(s.preguntas || {});
-      pregs.forEach(p => {
-        lista.push({
-          ...p,
-          _sesion_id: s.sesion,
-          _sesion_nombre: s.nombre || "",
-          _key: `${s.sesion}_${p.id}`,
+    try {
+      if (!encuesta?.sesiones) return [];
+      const norm = v => v ? (Array.isArray(v) ? v : Object.values(v)) : [];
+      const lista = [];
+      norm(encuesta.sesiones).forEach((s, si) => {
+        const sesionId = s.sesion ?? si + 1;
+        norm(s.preguntas).forEach((p, pi) => {
+          if (!p || !p.enunciado) return; // skip empty
+          lista.push({
+            ...p,
+            id: p.id ?? pi + 1,
+            tipo: p.tipo || "seleccion_unica",
+            opciones: Array.isArray(p.opciones) ? p.opciones : Object.values(p.opciones || {}),
+            _sesion_id: sesionId,
+            _sesion_nombre: s.nombre || `Sesión ${sesionId}`,
+            _key: `${sesionId}_${p.id ?? pi + 1}`,
+          });
         });
       });
-    });
-    return lista;
+      return lista;
+    } catch(e) {
+      console.error("[SurveyAI] Error building preguntas:", e);
+      return [];
+    }
   })();
 
   const total = todasLasPreguntas.length;
+  console.log("[SurveyAI] Preguntas cargadas:", total, "encuesta:", encuesta?.titulo);
 
   // ── Estado del Agente Local ───────────────────────────────────
   const [respuestas, setRespuestas] = useState(() => {
     const r = {};
     todasLasPreguntas.forEach(p => {
-      r[p._key] = p.tipo === "seleccion_multiple" ? [] : "";
+      r[p._key] = (p.tipo === "seleccion_multiple") ? [] : "";
     });
     return r;
   });
