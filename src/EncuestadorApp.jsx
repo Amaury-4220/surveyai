@@ -261,6 +261,7 @@ function PantallaEncuesta({ encuesta, jornada, ficha, user, online, onComplete, 
 
   // ── AGENTE LOCAL: construye lista plana de preguntas ─────────
   const todasLasPreguntas = (() => {
+    if (!encuesta?.sesiones) return [];
     const lista = [];
     const sesiones = Array.isArray(encuesta.sesiones)
       ? encuesta.sesiones
@@ -818,12 +819,13 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [stats, setStats] = useState(() => { Stats.resetHoy?.(); return Stats.get(); });
 
   // Load from Firebase if enc= param exists and no inline data
-  const [encuestaActiva, setEncuestaActiva] = useState(encuesta);
+  const [encuestaActiva, setEncuestaActiva] = useState(encuesta || null);
   useEffect(() => {
-    if (!encIdFromUrl || encuesta) return; // Already have inline data
+    if (encuesta) { setEncLoading(false); return; } // Already have inline data
+    if (!encIdFromUrl) { setEncLoading(false); return; }
     import("./firebase.js").then(({ cargarEncuesta }) => {
       cargarEncuesta(encIdFromUrl).then(enc => {
-        if (enc) { setEncuestaActiva(enc); }
+        if (enc) setEncuestaActiva(enc);
         setEncLoading(false);
       }).catch(() => setEncLoading(false));
     }).catch(() => setEncLoading(false));
@@ -951,7 +953,7 @@ export default function Layer3Encuestador({ session, onLogout }) {
           onCancelar={() => setScreen("home")}/>
       )}
 
-      {screen === "encuesta" && (
+      {screen === "encuesta" && encuestaFinal && (
         <PantallaEncuesta
           encuesta={encuestaFinal} jornada={jornada} ficha={ficha}
           user={user} online={online}
