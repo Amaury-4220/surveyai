@@ -692,14 +692,8 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
       try{ fbId=await guardarEncuesta({...data,estado:"active"}); }
       catch(e){ console.error("Firebase backup error:",e); }
 
-      // Encode full encuesta in URL — no Firebase dependency for loading
-      const jsonStr = JSON.stringify(data);
-      const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
-
-      // Use short Firebase ID if available, fallback to encoded data
-      const link = fbId
-        ? `${window.location.origin}/encuestador?enc=${fbId}&eq=${encoded}`
-        : `${window.location.origin}/encuestador?eq=${encoded}`;
+      // SHORT link — Firebase ID only
+      const link = `${window.location.origin}/encuestador?enc=${fbId || data.encuesta_id}`;
 
       onEncuestaCreada({...data,firebase_id:fbId,estado:"active"});
       setResult(prev=>({...prev,codigo,link,publicada:true}));
