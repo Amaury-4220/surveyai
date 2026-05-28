@@ -58,67 +58,119 @@ export async function guardarRespuesta(payload) {
   return cabecera_id;
 }
 
-// ─── ESCRITURA — Guardar encuesta generada por IA ─────
-export async function guardarEncuesta(encuesta, mandante_id = "demo") {
-  const encuestasRef = ref(db, "encuestas");
+// ─── Eliminar undefined/null recursivamente para Firebase ─────
+function deepClean(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(deepClean).filter(v => v !== undefined && v !== null);
+  }
+  if (obj !== null && typeof obj === "object") {
+    const clean = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v === undefined || v === null) continue;
+      const cleaned = deepClean(v);
+      if (cleaned !== undefined && cleaned !== null) clean[k] = cleaned;
+    }
+    return clean;
+  }
+  return obj;
+}
 
-  // Serialize sesiones as plain objects (Firebase doesn't support nested arrays well)
-  const sesionesSerializadas = (encuesta.sesiones || []).reduce((acc, s, i) => {
-    acc[i] = {
-      sesion: s.sesion || i+1,
+// ─── Normalizar sesiones desde Firebase a arrays ──────────────
+function normalizarEncuesta(data, firebaseId) {
+  if (!data) return null;
+  const toArr = v => v ? (Array.isArray(v) ? v : Object.values(v)) : [];
+  return {
+    firebase_id: firebaseId,
+    encuesta_id: data.encuesta_id || firebaseId,
+    titulo: data.titulo || "",
+    cliente: data.cliente || "",
+    objetivo_negocio: data.objetivo_negocio || "",
+    codigo: data.codigo || "",
+    total_preguntas: data.total_preguntas || 0,
+    creado_at: data.creado_at || "",
+    estado: data.estado || "active",
+    sesiones: toArr(data.sesiones).map((s, si) => ({
+      sesion: s.sesion ?? si + 1,
       nombre: s.nombre || "",
       metodologia: s.metodologia || "",
-      preguntas: (s.preguntas || []).reduce((pacc, p, j) => {
-        pacc[j] = {
-          id: p.id || j+1,
+      preguntas: toArr(s.preguntas).map((p, pi) => {
+        const opciones = Array.isArray(p.opciones)
+          ? p.opciones
+          : Object.values(p.opciones || {});
+        const reglas = { requerido: !!p.reglas?.requerido };
+        if (p.reglas?.salto_logico) reglas.salto_logico = p.reglas.salto_logico;
+        if (p.reglas?.max_opciones) reglas.max_opciones = p.reglas.max_opciones;
+        const pregunta = {
+          id: p.id ?? pi + 1,
           tipo: p.tipo || "seleccion_unica",
           metodologia: p.metodologia || "",
           enunciado: p.enunciado || "",
-          opciones: p.opciones || [],
-          reglas: p.reglas || { requerido: true },
+          opciones,
+          reglas,
         };
-        if (p.opciones_conjoint) pacc[j].opciones_conjoint = p.opciones_conjoint;
-        if (p.tiempo_max_ms) pacc[j].tiempo_max_ms = p.tiempo_max_ms;
-        return pacc;
-      }, {}),
-    };
-    return acc;
-  }, {});
+        if (p.opciones_conjoint) {
+          pregunta.opciones_conjoint = Array.isArray(p.opciones_conjoint)
+            ? p.opciones_conjoint
+            : Object.values(p.opciones_conjoint);
+        }
+        return pregunta;
+      })
+    }))
+  };
+}
 
-  const nueva = await push(encuestasRef, {
+// ─── ESCRITURA — Guardar encuesta generada por IA ─────────────
+export async function guardarEncuesta(encuesta, mandante_id = "demo") {
+  // Serializar sesiones como objetos indexados para Firebase
+  const sesionesObj = {};
+  (encuesta.sesiones || []).forEach((s, si) => {
+    const preguntasObj = {};
+    (s.preguntas || []).forEach((p, pi) => {
+      const reglas = { requerido: !!p.reglas?.requerido };
+      if (p.reglas?.salto_logico) reglas.salto_logico = p.reglas.salto_logico;
+      if (p.reglas?.max_opciones) reglas.max_opciones = p.reglas.max_opciones;
+      const pregClean = {
+        id: p.id ?? pi + 1,
+        tipo: p.tipo || "seleccion_unica",
+        metodologia: p.metodologia || "",
+        enunciado: p.enunciado || "",
+        opciones: Array.isArray(p.opciones) ? p.opciones : [],
+        reglas,
+      };
+      if (p.opciones_conjoint) pregClean.opciones_conjoint = p.opciones_conjoint;
+      preguntasObj[pi] = pregClean;
+    });
+    sesionesObj[si] = {
+      sesion: s.sesion ?? si + 1,
+      nombre: s.nombre || "",
+      metodologia: s.metodologia || "",
+      preguntas: preguntasObj,
+    };
+  });
+
+  const payload = deepClean({
     encuesta_id: encuesta.encuesta_id || "",
     titulo: encuesta.titulo || "",
+    cliente: encuesta.cliente || "",
     objetivo_negocio: (encuesta.objetivo_negocio || "").slice(0, 500),
     codigo: encuesta.codigo || "",
     total_preguntas: encuesta.total_preguntas || 0,
     mandante_id,
     creado_at: new Date().toISOString(),
     estado: "active",
-    sesiones: sesionesSerializadas,
+    sesiones: sesionesObj,
   });
+
+  const encuestasRef = ref(db, "encuestas");
+  const nueva = await push(encuestasRef, payload);
   return nueva.key;
 }
 
-// ─── LECTURA — Cargar encuesta por ID con normalización ──
+// ─── LECTURA — Cargar encuesta por Firebase ID ────────────────
 export async function cargarEncuesta(firebaseId) {
-  const snap = await get(ref(db, `encuestas/${firebaseId}`));
+  const snap = await get(ref(db, \`encuestas/\${firebaseId}\`));
   if (!snap.exists()) return null;
-  const data = snap.val();
-
-  // Normalize sesiones from Firebase object to array
-  const sesiones = data.sesiones
-    ? Object.values(data.sesiones).map(s => ({
-        ...s,
-        preguntas: s.preguntas
-          ? Object.values(s.preguntas).map(p => ({
-              ...p,
-              opciones: Array.isArray(p.opciones) ? p.opciones : Object.values(p.opciones || {}),
-            }))
-          : []
-      }))
-    : [];
-
-  return { firebase_id: firebaseId, ...data, sesiones };
+  return normalizarEncuesta(snap.val(), firebaseId);
 }
 
 // ─── LECTURA — Escuchar respuestas en tiempo real ─────
