@@ -690,10 +690,16 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
       // Save to Firebase for analytics (backup)
       let fbId=null;
       try{ fbId=await guardarEncuesta({...data,estado:"active"}); }
-      catch(e){ console.error("Firebase backup error:",e); }
+      catch(e){ console.error("Firebase error:",e); }
 
-      // SHORT link — Firebase ID only
-      const link = `${window.location.origin}/encuestador?enc=${fbId || data.encuesta_id}`;
+      if (!fbId) {
+        setError("Error al guardar en Firebase. Verifica tu conexión.");
+        setPublicando(false);
+        return;
+      }
+
+      // SHORT link with Firebase ID
+      const link = `${window.location.origin}/encuestador?enc=${fbId}`;
 
       onEncuestaCreada({...data,firebase_id:fbId,estado:"active"});
       setResult(prev=>({...prev,codigo,link,publicada:true}));
