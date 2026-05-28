@@ -98,7 +98,17 @@ function normalizarEncuesta(data, firebaseId) {
           ? p.opciones
           : Object.values(p.opciones || {});
         const reglas = { requerido: !!p.reglas?.requerido };
-        if (p.reglas?.salto_logico) reglas.salto_logico = p.reglas.salto_logico;
+        if (p.reglas?.salto_logico_arr) {
+          // Restore salto_logico from array format
+          const sl = {};
+          const arr = Array.isArray(p.reglas.salto_logico_arr) 
+            ? p.reglas.salto_logico_arr 
+            : Object.values(p.reglas.salto_logico_arr);
+          arr.forEach(item => { if(item.opcion) sl[item.opcion] = item.accion; });
+          reglas.salto_logico = sl;
+        } else if (p.reglas?.salto_logico) {
+          reglas.salto_logico = p.reglas.salto_logico;
+        }
         if (p.reglas?.max_opciones) reglas.max_opciones = p.reglas.max_opciones;
         const pregunta = {
           id: p.id ?? pi + 1,
@@ -127,7 +137,14 @@ export async function guardarEncuesta(encuesta, mandante_id = "demo") {
     const preguntasObj = {};
     (s.preguntas || []).forEach((p, pi) => {
       const reglas = { requerido: !!p.reglas?.requerido };
-      if (p.reglas?.salto_logico) reglas.salto_logico = p.reglas.salto_logico;
+      if (p.reglas?.salto_logico) {
+        // Convert to array to avoid Firebase invalid key chars ($, ., #, etc.)
+        const sl = p.reglas.salto_logico;
+        reglas.salto_logico_arr = Object.entries(sl).map(([opcion, accion]) => ({
+          opcion: String(opcion).slice(0, 200),
+          accion: String(accion)
+        }));
+      }
       if (p.reglas?.max_opciones) reglas.max_opciones = p.reglas.max_opciones;
       const pregClean = {
         id: p.id ?? pi + 1,
