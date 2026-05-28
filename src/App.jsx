@@ -652,93 +652,37 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
   };
 
   const publicar = async () => {
-    if(!result||publicando) return;
+    if (!result || publicando) return;
     setPublicando(true); setError(null);
-    try{
-      const ADJS=["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
-      const codigo=`${ADJS[Math.floor(Math.random()*ADJS.length)]}-${new Date().getFullYear()}`;
+    try {
+      const ADJS = ["AGUILA","CONDOR","PUMA","ZORRO","LOBO","TIGRE","FALCON","JAGUAR"];
+      const codigo = `${ADJS[Math.floor(Math.random()*ADJS.length)]}-${new Date().getFullYear()}`;
 
-      // Build clean encuesta object
-      const data={
-        encuesta_id:result.encuesta_id,
-        titulo:result.titulo,
-        cliente:result.cliente||"",
-        objetivo_negocio:result.objetivo_negocio,
+      const encuestaParaGuardar = {
+        encuesta_id: result.encuesta_id,
+        titulo: result.titulo || "Estudio sin título",
+        cliente: result.cliente || "",
+        objetivo_negocio: result.objetivo_negocio || "",
         codigo,
-        creado_at:new Date().toISOString(),
-        total_preguntas:result.total_preguntas,
-        sesiones:(result.sesiones||[]).map((s,si)=>({
-          sesion: s.sesion||si+1,
-          nombre: s.nombre||"",
-          metodologia: s.metodologia||"",
-          preguntas:(s.preguntas||[]).map((p,pi)=>({
-            id: p.id||pi+1,
-            tipo: p.tipo||"seleccion_unica",
-            metodologia: p.metodologia||"",
-            enunciado: p.enunciado||"",
-            opciones: Array.isArray(p.opciones)?p.opciones:[],
-            opciones_conjoint: p.opciones_conjoint||undefined,
-            reglas: {
-              requerido: p.reglas?.requerido||false,
-              salto_logico: p.reglas?.salto_logico||undefined,
-              max_opciones: p.reglas?.max_opciones||undefined,
-            },
-          }))
-        }))
+        total_preguntas: result.total_preguntas || 0,
+        sesiones: result.sesiones || [],
       };
 
-      // Save to Firebase for analytics (backup)
-      let fbId=null;
-      try{ fbId=await guardarEncuesta({...data,estado:"active"}); }
-      catch(e){ console.error("Firebase error:",e); }
+      // guardarEncuesta hace deepClean internamente
+      const fbId = await guardarEncuesta(encuestaParaGuardar);
 
-      if (!fbId) {
-        setError("Error al guardar en Firebase. Verifica tu conexión.");
-        setPublicando(false);
-        return;
-      }
+      if (!fbId) throw new Error("Firebase no devolvió un ID");
 
-      // SHORT link with Firebase ID
       const link = `${window.location.origin}/encuestador?enc=${fbId}`;
+      onEncuestaCreada({ ...encuestaParaGuardar, firebase_id: fbId, estado: "active" });
+      setResult(prev => ({ ...prev, codigo, link, publicada: true }));
 
-      onEncuestaCreada({...data,firebase_id:fbId,estado:"active"});
-      setResult(prev=>({...prev,codigo,link,publicada:true}));
-
-    }catch(e){
-      console.error("[SurveyAI] Error publicar:",e);
-      setError("Error al publicar. Intenta de nuevo.");
-    }finally{ setPublicando(false); }
-  };
-
-  const copyLink = () => {
-    if(!result?.link) return;
-    const el=document.createElement("textarea"); el.value=result.link;
-    el.style.position="fixed"; el.style.opacity="0";
-    document.body.appendChild(el); el.focus(); el.select();
-    try{ document.execCommand("copy"); }catch{}
-    document.body.removeChild(el);
-    if(navigator.clipboard) navigator.clipboard.writeText(result.link).catch(()=>{});
-    setCopiado(true); setTimeout(()=>setCopiado(false),2000);
-  };
-
-  const shareWA = () => {
-    if(!result?.link) return;
-    window.open(`https://wa.me/?text=${encodeURIComponent(
-      `*SurveyAI — ${result.titulo}*\n\n`+
-      (result.cliente?`📊 Cliente: *${result.cliente}*\n`:"") +
-      `🔑 Código: *${result.codigo}*\n`+
-      `📋 Preguntas: ${result.total_preguntas}\n\n`+
-      `🔗 Link:\n${result.link}\n\n`+
-      `_Declara tu jornada al iniciar._`
-    )}`,"_blank");
-  };
-
-  const shareEmail = () => {
-    if(!result?.link) return;
-    window.open(`mailto:?subject=${encodeURIComponent(`SurveyAI — ${result.titulo}`)}&body=${encodeURIComponent(
-      `Estudio: ${result.titulo}\n`+(result.cliente?`Cliente: ${result.cliente}\n`:"")+
-      `Código: ${result.codigo}\nPreguntas: ${result.total_preguntas}\n\nAccede aquí: ${result.link}`
-    )}`,"_blank");
+    } catch(e) {
+      console.error("[SurveyAI] Error publicar:", e);
+      setError(`Error al publicar: ${e.message}`);
+    } finally {
+      setPublicando(false);
+    }
   };
 
   const descargar = () => {
