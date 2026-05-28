@@ -691,6 +691,30 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
     a.download=`encuesta-${result.encuesta_id}.json`; a.click();
   };
 
+  const copyLink = () => {
+    if(!result?.link) return;
+    const el=document.createElement("textarea"); el.value=result.link;
+    el.style.position="fixed"; el.style.opacity="0";
+    document.body.appendChild(el); el.focus(); el.select();
+    try{document.execCommand("copy");}catch{}
+    document.body.removeChild(el);
+    if(navigator.clipboard) navigator.clipboard.writeText(result.link).catch(()=>{});
+    setCopiado(true); setTimeout(()=>setCopiado(false),2000);
+  };
+
+  const shareEmail = () => {
+    if(!result?.link) return;
+    window.open(`mailto:?subject=${encodeURIComponent(`SurveyAI — ${result.titulo}`)}&body=${encodeURIComponent(
+      `Estudio: ${result.titulo}
+`+(result.cliente?`Cliente: ${result.cliente}
+`:"")+
+      `Código: ${result.codigo}
+Preguntas: ${result.total_preguntas}
+
+Accede aquí: ${result.link}`
+    )}`,"_blank");
+  };
+
   // ── Animación ──
   if(fase==="generando") return (
     <div style={{minHeight:"70vh",display:"flex",flexDirection:"column",
