@@ -168,7 +168,7 @@ export async function guardarEncuesta(encuesta, mandante_id = "demo") {
 
 // ─── LECTURA — Cargar encuesta por Firebase ID ────────────────
 export async function cargarEncuesta(firebaseId) {
-  const snap = await get(ref(db, \`encuestas/\${firebaseId}\`));
+  const snap = await get(ref(db, `encuestas/${firebaseId}`));
   if (!snap.exists()) return null;
   return normalizarEncuesta(snap.val(), firebaseId);
 }
