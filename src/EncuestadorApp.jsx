@@ -38,22 +38,22 @@ const Stats = {
 
 // ─── Decodificar encuesta del link ────────────────────────────
 function decodeEncuesta() {
+  // Only decode base64 if eq= param exists (legacy/testing)
   const params = new URLSearchParams(window.location.search);
   const eq = params.get("eq");
-  if (eq) {
+  if (eq && eq.length < 2000) { // Only short eq= params
     try {
       const json = decodeURIComponent(escape(atob(eq)));
       const enc = JSON.parse(json);
-      // Normalizar sesiones y preguntas (arrays o objetos de Firebase)
       const norm = (val) => Array.isArray(val) ? val : Object.values(val || {});
       enc.sesiones = norm(enc.sesiones).map(s => ({
         ...s,
         preguntas: norm(s.preguntas)
       }));
       return enc;
-    } catch(e) { console.error("decode error:", e); }
+    } catch(e) {}
   }
-  return null;
+  return null; // Will load from Firebase via enc= param
 }
 
 // ─── Comunas / Tipos ──────────────────────────────────────────
@@ -791,19 +791,9 @@ function PantallaHome({ user, jornada, encuesta, stats, pendingCount, online, on
 // ═══════════════════════════════════════════════════════════════
 export default function Layer3Encuestador({ session, onLogout }) {
   // 1. Decodificar encuesta del link PRIMERO
-  const [encuesta] = useState(() => {
-    const decoded = decodeEncuesta();
-    if (decoded) return decoded;
-    // Check legacy enc= param - show placeholder
-    const encId = new URLSearchParams(window.location.search).get("enc");
-    if (encId) return {
-      encuesta_id: encId,
-      titulo: "Cargando encuesta...",
-      sesiones: [],
-      _legacy: true,
-    };
-    return null;
-  });
+  const encIdFromUrl = new URLSearchParams(window.location.search).get("enc");
+  const [encuesta, setEncuesta] = useState(() => decodeEncuesta());
+  const [encLoading, setEncLoading] = useState(!!encIdFromUrl && !decodeEncuesta());
   const [screen, setScreen] = useState(() => {
     // Si hay encuesta nueva, limpiar jornada anterior
     if (encuesta) {
@@ -827,18 +817,19 @@ export default function Layer3Encuestador({ session, onLogout }) {
   const [syncing, setSyncing] = useState(false);
   const [stats, setStats] = useState(() => { Stats.resetHoy?.(); return Stats.get(); });
 
-  // Load legacy enc= from Firebase if no eq= param
-  const [encuestaActiva, setEncuestaActiva] = useState(encuesta && !encuesta._legacy ? encuesta : null);
+  // Load from Firebase if enc= param exists and no inline data
+  const [encuestaActiva, setEncuestaActiva] = useState(encuesta);
   useEffect(() => {
-    if (!encuesta?._legacy) return;
+    if (!encIdFromUrl || encuesta) return; // Already have inline data
     import("./firebase.js").then(({ cargarEncuesta }) => {
-      cargarEncuesta(encuesta.encuesta_id).then(enc => {
-        if (enc) setEncuestaActiva(enc);
-      }).catch(() => {});
-    }).catch(() => {});
+      cargarEncuesta(encIdFromUrl).then(enc => {
+        if (enc) { setEncuestaActiva(enc); }
+        setEncLoading(false);
+      }).catch(() => setEncLoading(false));
+    }).catch(() => setEncLoading(false));
   }, []);
 
-  const encuestaFinal = encuestaActiva || (encuesta && !encuesta._legacy ? encuesta : null);
+  const encuestaFinal = encuestaActiva;
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -860,6 +851,16 @@ export default function Layer3Encuestador({ session, onLogout }) {
   };
 
   const user = { id: session?.email || "enc-demo", nombre: session?.nombre || "Encuestador", empresa: session?.empresa || "" };
+
+  if (encLoading) return (
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{"@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}"}</style>
+      <div style={{width:40,height:40,border:`2px solid ${T.cyan}`,borderTopColor:"transparent",
+        borderRadius:"50%",animation:"spin 1s linear infinite",marginBottom:12}}/>
+      <div style={{fontSize:12,color:T.textMuted}}>Cargando encuesta...</div>
+    </div>
+  );
 
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:T.bg,
