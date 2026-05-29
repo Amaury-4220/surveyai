@@ -1206,43 +1206,59 @@ function Respuestas({ stats, encuestas }) {
     setAnalisis(null);
     try {
       import("./firebase.js").then(({ escucharRespuestas }) => {
-        escucharRespuestas(encuesta.firebase_id || encuesta.encuesta_id, data => {
-          setDetalle(data || []);
+        // Load ALL responses and filter client-side (ID mismatch fix)
+        escucharRespuestas(null, data => {
+          const fbId = encuesta.firebase_id || encuesta.encuesta_id;
+          const encId = encuesta.encuesta_id;
+          // Match by any possible ID combination
+          const filtradas = (data||[]).filter(r =>
+            r.encuesta_id === fbId ||
+            r.encuesta_id === encId ||
+            r.encuesta_titulo === encuesta.titulo ||
+            (encuesta.codigo && r.encuesta_codigo === encuesta.codigo)
+          );
+          // If no match found, show ALL non-discarded responses
+          setDetalle(filtradas.length > 0 ? filtradas : (data||[]).filter(r => !r.es_descarte));
           setLoadingDetalle(false);
         });
       });
     } catch { setLoadingDetalle(false); }
   };
 
-  // Generar análisis con IA
+  // Generar análisis con IA — 5 agentes + orquestador
   const generarAnalisis = async () => {
-    if (!detalle?.length || !encuestaSeleccionada) return;
+    if (!encuestaSeleccionada) return;
     setGenerandoAnalisis(true); setErrorAnalisis(null);
 
     try {
-      const paquetes = detalle
-        .filter(r => !r.es_descarte && r.paquete_completo)
-        .map(r => {
-          const arr = Array.isArray(r.paquete_completo)
-            ? r.paquete_completo
-            : Object.values(r.paquete_completo || {});
-          return arr;
-        });
+      const todasResp = (detalle||[]).filter(r => !r.es_descarte);
+      if (todasResp.length === 0) {
+        setErrorAnalisis("No hay respuestas completadas para analizar.");
+        setGenerandoAnalisis(false);
+        return;
+      }
 
+      // Construir resumen de respuestas
       const resumen = {};
-      paquetes.forEach(paquete => {
+      todasResp.forEach(r => {
+        const paquete = r.paquete_completo
+          ? (Array.isArray(r.paquete_completo) ? r.paquete_completo : Object.values(r.paquete_completo))
+          : [];
         paquete.forEach(item => {
-          const key = `${item.numero}. ${item.enunciado}`;
+          const key = `${item.numero||""} ${item.enunciado||""}`.trim().slice(0, 100);
+          if (!key) return;
           if (!resumen[key]) resumen[key] = [];
-          resumen[key].push(String(item.respuesta || ""));
+          const val = Array.isArray(item.respuesta) ? item.respuesta.join(", ") : String(item.respuesta||"");
+          if (val) resumen[key].push(val);
         });
       });
 
       const { bunkerCall } = await import("./bunker.js");
       const res = await bunkerCall("generar_analisis", {
         encuesta_titulo: encuestaSeleccionada.titulo,
-        total_encuestados: paquetes.length,
-        total_descartes: detalle.filter(r => r.es_descarte).length,
+        encuesta_objetivo: encuestaSeleccionada.objetivo_negocio || "",
+        total_encuestados: todasResp.length + (detalle||[]).filter(r=>r.es_descarte).length,
+        total_descartes: (detalle||[]).filter(r => r.es_descarte).length,
         resumen_respuestas: resumen,
       });
 
@@ -1250,9 +1266,10 @@ function Respuestas({ stats, encuestas }) {
         setAnalisis(res.analisis);
         setVista("analisis");
       } else {
-        throw new Error("Sin análisis");
+        throw new Error("Sin análisis del orquestador");
       }
     } catch(e) {
+      console.error("Error análisis:", e);
       setErrorAnalisis("Error generando análisis. Intenta de nuevo.");
     } finally {
       setGenerandoAnalisis(false);
@@ -1307,9 +1324,11 @@ function Respuestas({ stats, encuestas }) {
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {encuestas.map((e,i) => {
+            const fbId = e.firebase_id || e.encuesta_id;
             const count = respuestas.filter(r =>
-              r.encuesta_id === (e.firebase_id||e.encuesta_id) ||
-              r.encuesta_id === e.encuesta_id
+              r.encuesta_id === fbId ||
+              r.encuesta_id === e.encuesta_id ||
+              r.encuesta_titulo === e.titulo
             ).length;
             return (
               <Card key={i} onClick={() => verResultados(e)}>
@@ -1350,7 +1369,7 @@ function Respuestas({ stats, encuestas }) {
           </div>
         </div>
         <Btn icon={Sparkles} onClick={generarAnalisis} loading={generandoAnalisis} sm>
-          Generar análisis IA
+          {generandoAnalisis ? "Analizando con 5 agentes..." : "Generar análisis IA"}
         </Btn>
       </div>
 
@@ -1549,6 +1568,86 @@ function Respuestas({ stats, encuestas }) {
             📝 CONCLUSIÓN
           </div>
           <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{analisis.conclusion}</div>
+        </Card>
+      )}
+
+      {/* Semáforo de viabilidad */}
+      {analisis.semaforo&&(
+        <Card s={{marginBottom:14,textAlign:"center",
+          borderColor: analisis.semaforo.startsWith("VERDE")?T.green+"40":
+                       analisis.semaforo.startsWith("ROJO")?T.red+"40":T.yellow+"40",
+          background: analisis.semaforo.startsWith("VERDE")?`${T.green}08`:
+                      analisis.semaforo.startsWith("ROJO")?`${T.red}08`:`${T.yellow}08`}}>
+          <div style={{fontSize:32,marginBottom:8}}>
+            {analisis.semaforo.startsWith("VERDE")?"🟢":analisis.semaforo.startsWith("ROJO")?"🔴":"🟡"}
+          </div>
+          <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:6}}>
+            VIABILIDAD: {analisis.semaforo.split(" ")[0]}
+          </div>
+          <div style={{fontSize:12,color:T.textSec,lineHeight:1.6}}>
+            {analisis.semaforo.split(" ").slice(1).join(" ")}
+          </div>
+        </Card>
+      )}
+
+      {/* Análisis por agente */}
+      {analisis.agentes?.length>0&&(
+        <Card s={{marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:12}}>
+            🤖 Análisis por agente especializado
+          </div>
+          {analisis.agentes.map((ag,i)=>{
+            const COLS=[T.cyan,T.violet,T.green,T.yellow,T.orange];
+            return(
+              <div key={i} style={{marginBottom:12,padding:12,borderRadius:10,
+                background:T.elevated,border:`1px solid ${COLS[i%5]}20`}}>
+                <div style={{fontSize:11,fontWeight:800,color:COLS[i%5],marginBottom:6}}>
+                  {ag.agente}
+                </div>
+                {ag.insight_clave&&(
+                  <div style={{fontSize:12,color:T.text,lineHeight:1.6,marginBottom:6}}>
+                    {ag.insight_clave}
+                  </div>
+                )}
+                {ag.hallazgos?.map((h,j)=>(
+                  <div key={j} style={{fontSize:11,color:T.textSec,marginBottom:3,
+                    paddingLeft:10,borderLeft:`2px solid ${COLS[i%5]}40`}}>
+                    • {h}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      {/* Intención de compra */}
+      {analisis.intencion_compra&&(
+        <Card s={{marginBottom:14,borderColor:`${T.violet}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.violet,marginBottom:8}}>
+            🎯 INTENCIÓN REAL DE COMPRA
+          </div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{analisis.intencion_compra}</div>
+        </Card>
+      )}
+
+      {/* Potencial de mercado */}
+      {analisis.potencial_mercado&&(
+        <Card s={{marginBottom:14,borderColor:`${T.cyan}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.cyan,marginBottom:8}}>
+            📈 POTENCIAL DE MERCADO
+          </div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{analisis.potencial_mercado}</div>
+        </Card>
+      )}
+
+      {/* Perfil del comprador */}
+      {analisis.perfil_comprador&&(
+        <Card s={{marginBottom:14,borderColor:`${T.violet}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.violet,marginBottom:8}}>
+            👤 PERFIL DEL COMPRADOR
+          </div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{analisis.perfil_comprador}</div>
         </Card>
       )}
 
