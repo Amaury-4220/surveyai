@@ -691,6 +691,18 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
     a.download=`encuesta-${result.encuesta_id}.json`; a.click();
   };
 
+  const shareWA = () => {
+    if(!result?.link) return;
+    window.open(`https://wa.me/?text=${encodeURIComponent(
+      `*SurveyAI — ${result.titulo}*\n\n` +
+      (result.cliente?`🏢 Cliente: *${result.cliente}*\n`:"") +
+      `🔑 Código: *${result.codigo}*\n` +
+      `📋 Preguntas: ${result.total_preguntas}\n\n` +
+      `🔗 Link:\n${result.link}\n\n` +
+      `_Declara tu jornada al iniciar._`
+    )}`,"_blank");
+  };
+
   const copyLink = () => {
     if(!result?.link) return;
     const el=document.createElement("textarea"); el.value=result.link;
