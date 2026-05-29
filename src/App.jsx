@@ -1262,36 +1262,21 @@ function Respuestas({ stats, encuestas }) {
   // Compartir análisis
   const compartirWA = () => {
     if (!analisis) return;
-    const txt = `*Análisis SurveyAI — ${encuestaSeleccionada?.titulo}*
-
-` +
-      `📊 Encuestados: ${analisis.total_encuestados}
-` +
-      `✅ Completados: ${analisis.completados}
-
-` +
-      `🎯 *Hallazgo principal:*
-${analisis.hallazgo_principal}
-
-` +
-      `💰 *Precio óptimo:*
-${analisis.precio_optimo}
-
-` +
-      `⭐ *Campos fuertes:*
-${(analisis.campos_fuertes||[]).join("
-")}
-
-` +
-      `⚠️ *Campos débiles:*
-${(analisis.campos_debiles||[]).join("
-")}
-
-` +
-      `💡 *Recomendaciones:*
-${(analisis.recomendaciones||[]).join("
-")}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
+    const fuertes = (analisis.campos_fuertes||[]).join(", ");
+    const debiles = (analisis.campos_debiles||[]).join(", ");
+    const recomend = (analisis.recomendaciones||[]).join(", ");
+    const partes = [
+      "Analisis SurveyAI",
+      "Encuesta: " + (encuestaSeleccionada?.titulo||""),
+      "Encuestados: " + (analisis.total_encuestados||0),
+      "Completados: " + (analisis.completados||0),
+      "Hallazgo: " + (analisis.hallazgo_principal||""),
+      "Precio optimo: " + (analisis.precio_optimo||""),
+      "Campos fuertes: " + fuertes,
+      "Campos debiles: " + debiles,
+      "Recomendaciones: " + recomend,
+    ];
+    window.open("https://wa.me/?text=" + encodeURIComponent(partes.join("\n\n")), "_blank");
   };
 
   const imprimirAnalisis = () => window.print();
