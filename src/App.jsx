@@ -1,5 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  SURVEYAI — CAPA 2: PANEL MANDANTE v6                       ║
+// ║  SURVEYAI — CAPA 2: PANEL MANDANTE v5                       ║
 // ║  Todos los botones funcionales + Cliente + Ver encuesta      ║
 // ╚══════════════════════════════════════════════════════════════╝
 import { useState, useEffect, useRef } from "react";
@@ -679,7 +679,8 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
 
     } catch(e) {
       console.error("[SurveyAI] Error publicar:", e);
-      setError(`Error al publicar: ${e.message || String(e)}`);
+      setError(`Error al publicar: ${e.message}`);
+    } finally {
       setPublicando(false);
     }
   };
@@ -794,7 +795,7 @@ Accede aquí: ${result.link}`
             <div>
               <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:3}}>✅ Estudio completo</div>
               <div style={{fontSize:12,color:T.textSec}}>
-                {result.sesiones?.length||0} sesiones · {result.total_preguntas} preguntas · {fmt(secs)}
+                {result.sesiones?.length} sesiones · {result.total_preguntas} preguntas · {fmt(secs)}
                 {result.cliente&&` · ${result.cliente}`}
               </div>
             </div>
@@ -1175,14 +1176,133 @@ function MisEncuestas({ encuestas, session }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// RESPUESTAS
+// RESPUESTAS — Ver resultados + Análisis IA + Lista de espera
 // ═══════════════════════════════════════════════════════════════
-function Respuestas({ stats }) {
-  return (
+function Respuestas({ stats, encuestas }) {
+  const [respuestas, setRespuestas] = useState([]);
+  const [encuestaSeleccionada, setEncuestaSeleccionada] = useState(null);
+  const [detalle, setDetalle] = useState(null);
+  const [loadingDetalle, setLoadingDetalle] = useState(false);
+  const [analisis, setAnalisis] = useState(null);
+  const [generandoAnalisis, setGenerandoAnalisis] = useState(false);
+  const [errorAnalisis, setErrorAnalisis] = useState(null);
+  const [vista, setVista] = useState("lista"); // lista | resultados | analisis
+
+  // Cargar respuestas desde Firebase
+  useEffect(() => {
+    import("./firebase.js").then(({ escucharRespuestas }) => {
+      const unsub = escucharRespuestas(null, data => {
+        setRespuestas(data || []);
+      });
+      return () => unsub?.();
+    }).catch(() => {});
+  }, []);
+
+  // Cargar detalle de respuestas de una encuesta
+  const verResultados = async (encuesta) => {
+    setEncuestaSeleccionada(encuesta);
+    setLoadingDetalle(true);
+    setVista("resultados");
+    setAnalisis(null);
+    try {
+      import("./firebase.js").then(({ escucharRespuestas }) => {
+        escucharRespuestas(encuesta.firebase_id || encuesta.encuesta_id, data => {
+          setDetalle(data || []);
+          setLoadingDetalle(false);
+        });
+      });
+    } catch { setLoadingDetalle(false); }
+  };
+
+  // Generar análisis con IA
+  const generarAnalisis = async () => {
+    if (!detalle?.length || !encuestaSeleccionada) return;
+    setGenerandoAnalisis(true); setErrorAnalisis(null);
+
+    try {
+      const paquetes = detalle
+        .filter(r => !r.es_descarte && r.paquete_completo)
+        .map(r => {
+          const arr = Array.isArray(r.paquete_completo)
+            ? r.paquete_completo
+            : Object.values(r.paquete_completo || {});
+          return arr;
+        });
+
+      const resumen = {};
+      paquetes.forEach(paquete => {
+        paquete.forEach(item => {
+          const key = `${item.numero}. ${item.enunciado}`;
+          if (!resumen[key]) resumen[key] = [];
+          resumen[key].push(String(item.respuesta || ""));
+        });
+      });
+
+      const { bunkerCall } = await import("./bunker.js");
+      const res = await bunkerCall("generar_analisis", {
+        encuesta_titulo: encuestaSeleccionada.titulo,
+        total_encuestados: paquetes.length,
+        total_descartes: detalle.filter(r => r.es_descarte).length,
+        resumen_respuestas: resumen,
+      });
+
+      if (res?.analisis) {
+        setAnalisis(res.analisis);
+        setVista("analisis");
+      } else {
+        throw new Error("Sin análisis");
+      }
+    } catch(e) {
+      setErrorAnalisis("Error generando análisis. Intenta de nuevo.");
+    } finally {
+      setGenerandoAnalisis(false);
+    }
+  };
+
+  // Compartir análisis
+  const compartirWA = () => {
+    if (!analisis) return;
+    const txt = `*Análisis SurveyAI — ${encuestaSeleccionada?.titulo}*
+
+` +
+      `📊 Encuestados: ${analisis.total_encuestados}
+` +
+      `✅ Completados: ${analisis.completados}
+
+` +
+      `🎯 *Hallazgo principal:*
+${analisis.hallazgo_principal}
+
+` +
+      `💰 *Precio óptimo:*
+${analisis.precio_optimo}
+
+` +
+      `⭐ *Campos fuertes:*
+${(analisis.campos_fuertes||[]).join("
+")}
+
+` +
+      `⚠️ *Campos débiles:*
+${(analisis.campos_debiles||[]).join("
+")}
+
+` +
+      `💡 *Recomendaciones:*
+${(analisis.recomendaciones||[]).join("
+")}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, "_blank");
+  };
+
+  const imprimirAnalisis = () => window.print();
+
+  // ── VISTA LISTA ──
+  if (vista === "lista") return (
     <div style={{padding:isMobile?16:24}}>
       <div style={{fontSize:22,fontWeight:900,color:T.text,marginBottom:4}}>Respuestas</div>
-      <div style={{fontSize:13,color:T.textMuted,marginBottom:20}}>Tiempo real desde Firebase</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+      <div style={{fontSize:13,color:T.textMuted,marginBottom:20}}>Resultados en tiempo real desde Firebase</div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:24}}>
         {[["Total",stats.total||0,T.cyan],["Completadas",stats.completadas||0,T.green],
           ["Descartes",stats.descartes||0,T.red],["Hoy",stats.hoy||0,T.yellow]].map(([l,v,c])=>(
           <Card key={l} s={{padding:"16px 18px"}}>
@@ -1191,14 +1311,285 @@ function Respuestas({ stats }) {
           </Card>
         ))}
       </div>
-      {stats.total===0&&(
+
+      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12}}>
+        Ver resultados por encuesta
+      </div>
+      {encuestas.length === 0 ? (
         <Card s={{textAlign:"center",padding:40}}>
-          <div style={{fontSize:13,color:T.textSec,marginBottom:6}}>Sin respuestas aún</div>
-          <div style={{fontSize:12,color:T.textMuted}}>Las respuestas llegarán en tiempo real cuando los encuestadores trabajen.</div>
+          <div style={{fontSize:13,color:T.textSec}}>Sin encuestas aún</div>
         </Card>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {encuestas.map((e,i) => {
+            const count = respuestas.filter(r =>
+              r.encuesta_id === (e.firebase_id||e.encuesta_id) ||
+              r.encuesta_id === e.encuesta_id
+            ).length;
+            return (
+              <Card key={i} onClick={() => verResultados(e)}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:3}}>{e.titulo}</div>
+                    {e.cliente&&<div style={{fontSize:11,color:T.cyan,marginBottom:3}}>🏢 {e.cliente}</div>}
+                    <div style={{fontSize:11,color:T.textMuted}}>{e.creado_at?.slice(0,10)}</div>
+                  </div>
+                  <div style={{textAlign:"center",flexShrink:0}}>
+                    <div style={{fontSize:22,fontWeight:900,color:T.green}}>{count}</div>
+                    <div style={{fontSize:10,color:T.textMuted}}>respuestas</div>
+                  </div>
+                  <ChevronRight size={14} color={T.textMuted}/>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
       )}
     </div>
   );
+
+  // ── VISTA RESULTADOS ──
+  if (vista === "resultados") return (
+    <div style={{padding:isMobile?16:24}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+        <button onClick={()=>setVista("lista")}
+          style={{width:32,height:32,borderRadius:8,border:`1px solid ${T.border}`,
+            background:T.elevated,color:T.textSec,cursor:"pointer",fontFamily:"inherit",
+            display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <ArrowLeft size={14}/>
+        </button>
+        <div style={{flex:1}}>
+          <div style={{fontSize:16,fontWeight:800,color:T.text}}>{encuestaSeleccionada?.titulo}</div>
+          <div style={{fontSize:11,color:T.textMuted}}>
+            {detalle?.filter(r=>!r.es_descarte).length||0} completadas · {detalle?.filter(r=>r.es_descarte).length||0} descartes
+          </div>
+        </div>
+        <Btn icon={Sparkles} onClick={generarAnalisis} loading={generandoAnalisis} sm>
+          Generar análisis IA
+        </Btn>
+      </div>
+
+      {errorAnalisis&&(
+        <div style={{padding:"10px 14px",background:`${T.red}12`,border:`1px solid ${T.red}30`,
+          borderRadius:10,fontSize:12,color:T.red,marginBottom:14}}>
+          {errorAnalisis}
+        </div>
+      )}
+
+      {loadingDetalle ? (
+        <Card s={{textAlign:"center",padding:40}}>
+          <RefreshCw size={20} color={T.cyan} style={{animation:"spin 1s linear infinite",display:"block",margin:"0 auto 12px"}}/>
+          <div style={{fontSize:13,color:T.textMuted}}>Cargando respuestas...</div>
+        </Card>
+      ) : detalle?.length === 0 ? (
+        <Card s={{textAlign:"center",padding:40}}>
+          <div style={{fontSize:13,color:T.textSec}}>Sin respuestas para esta encuesta</div>
+        </Card>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {(detalle||[]).filter(r=>!r.es_descarte).map((resp, ri) => {
+            const paquete = resp.paquete_completo
+              ? (Array.isArray(resp.paquete_completo) ? resp.paquete_completo : Object.values(resp.paquete_completo))
+              : [];
+            return (
+              <Card key={ri} s={{borderColor:`${T.green}20`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                  <div style={{width:28,height:28,borderRadius:8,background:`${T.green}15`,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:12,fontWeight:800,color:T.green}}>
+                    {ri+1}
+                  </div>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,color:T.text}}>
+                      Entrevistado {ri+1}
+                    </div>
+                    <div style={{fontSize:10,color:T.textMuted}}>
+                      {resp.jornada?.comuna||""} · {resp.fecha_captura?.slice(0,10)||""}
+                    </div>
+                  </div>
+                  <div style={{marginLeft:"auto",fontSize:10,color:T.green,
+                    background:`${T.green}12`,padding:"2px 8px",borderRadius:20,fontWeight:700}}>
+                    ✓ {paquete.filter(p=>p.respuesta&&p.respuesta!=="").length}/{paquete.length} P
+                  </div>
+                </div>
+                {paquete.map((item, ii) => (
+                  <div key={ii} style={{display:"flex",gap:10,padding:"8px 0",
+                    borderBottom:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:10,fontWeight:700,color:T.cyan,
+                      background:`${T.cyan}12`,padding:"2px 7px",borderRadius:20,
+                      flexShrink:0,alignSelf:"flex-start",marginTop:2}}>
+                      P{item.numero}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:11,color:T.textMuted,marginBottom:3,lineHeight:1.4}}>
+                        {item.enunciado}
+                      </div>
+                      <div style={{fontSize:12,fontWeight:700,color:T.text}}>
+                        {Array.isArray(item.respuesta)
+                          ? item.respuesta.join(", ")
+                          : String(item.respuesta||"—")}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // ── VISTA ANÁLISIS ──
+  if (vista === "analisis" && analisis) return (
+    <div style={{padding:isMobile?16:24}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+        <button onClick={()=>setVista("resultados")}
+          style={{width:32,height:32,borderRadius:8,border:`1px solid ${T.border}`,
+            background:T.elevated,color:T.textSec,cursor:"pointer",fontFamily:"inherit",
+            display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <ArrowLeft size={14}/>
+        </button>
+        <div style={{flex:1}}>
+          <div style={{fontSize:16,fontWeight:800,color:T.text}}>Análisis IA</div>
+          <div style={{fontSize:11,color:T.textMuted}}>{encuestaSeleccionada?.titulo}</div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={compartirWA}
+            style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:9,
+              border:"none",background:"#25D366",color:"#fff",fontSize:12,fontWeight:700,
+              cursor:"pointer",fontFamily:"inherit"}}>
+            <MessageCircle size={12}/>WhatsApp
+          </button>
+          <button onClick={imprimirAnalisis}
+            style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:9,
+              border:`1px solid ${T.border}`,background:T.elevated,color:T.textSec,
+              fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            <Download size={12}/>Imprimir / PDF
+          </button>
+        </div>
+      </div>
+
+      {/* Resumen ejecutivo */}
+      <Card s={{marginBottom:14,background:`linear-gradient(135deg,${T.cyan}06,${T.violet}04)`,borderColor:`${T.cyan}20`}}>
+        <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:12}}>
+          📊 Resumen ejecutivo
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          {[
+            ["👥 Encuestados",analisis.total_encuestados||0],
+            ["✅ Completados",analisis.completados||0],
+            ["❌ Descartes",analisis.descartes||0],
+            ["📈 Tasa completación",`${analisis.tasa_completacion||0}%`],
+          ].map(([l,v])=>(
+            <div key={l} style={{background:T.elevated,borderRadius:9,padding:"10px 12px"}}>
+              <div style={{fontSize:10,color:T.textMuted,marginBottom:3}}>{l}</div>
+              <div style={{fontSize:16,fontWeight:900,color:T.text}}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{padding:"12px 14px",background:T.elevated,borderRadius:10,
+          border:`1px solid ${T.cyan}20`}}>
+          <div style={{fontSize:10,fontWeight:700,color:T.cyan,marginBottom:6}}>
+            🎯 HALLAZGO PRINCIPAL
+          </div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>
+            {analisis.hallazgo_principal}
+          </div>
+        </div>
+      </Card>
+
+      {/* Precio óptimo */}
+      {analisis.precio_optimo&&(
+        <Card s={{marginBottom:14,borderColor:`${T.green}25`,background:`${T.green}06`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.green,marginBottom:6}}>
+            💰 PRECIO ÓPTIMO
+          </div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{analisis.precio_optimo}</div>
+        </Card>
+      )}
+
+      {/* Campos fuertes */}
+      {analisis.campos_fuertes?.length>0&&(
+        <Card s={{marginBottom:14,borderColor:`${T.green}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.green,marginBottom:10}}>
+            ⭐ CAMPOS FUERTES
+          </div>
+          {analisis.campos_fuertes.map((c,i)=>(
+            <div key={i} style={{display:"flex",gap:8,padding:"7px 0",
+              borderBottom:i<analisis.campos_fuertes.length-1?`1px solid ${T.border}`:"none"}}>
+              <span style={{color:T.green,flexShrink:0}}>✓</span>
+              <span style={{fontSize:12,color:T.text,lineHeight:1.5}}>{c}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* Campos débiles */}
+      {analisis.campos_debiles?.length>0&&(
+        <Card s={{marginBottom:14,borderColor:`${T.red}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.red,marginBottom:10}}>
+            ⚠️ CAMPOS DÉBILES
+          </div>
+          {analisis.campos_debiles.map((c,i)=>(
+            <div key={i} style={{display:"flex",gap:8,padding:"7px 0",
+              borderBottom:i<analisis.campos_debiles.length-1?`1px solid ${T.border}`:"none"}}>
+              <span style={{color:T.red,flexShrink:0}}>!</span>
+              <span style={{fontSize:12,color:T.text,lineHeight:1.5}}>{c}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* Recomendaciones */}
+      {analisis.recomendaciones?.length>0&&(
+        <Card s={{marginBottom:14,borderColor:`${T.violet}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.violet,marginBottom:10}}>
+            💡 RECOMENDACIONES
+          </div>
+          {analisis.recomendaciones.map((r,i)=>(
+            <div key={i} style={{display:"flex",gap:8,padding:"7px 0",
+              borderBottom:i<analisis.recomendaciones.length-1?`1px solid ${T.border}`:"none"}}>
+              <span style={{color:T.violet,flexShrink:0}}>→</span>
+              <span style={{fontSize:12,color:T.text,lineHeight:1.5}}>{r}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {/* Conclusión */}
+      {analisis.conclusion&&(
+        <Card s={{marginBottom:20,borderColor:`${T.cyan}20`}}>
+          <div style={{fontSize:12,fontWeight:700,color:T.cyan,marginBottom:8}}>
+            📝 CONCLUSIÓN
+          </div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.7}}>{analisis.conclusion}</div>
+        </Card>
+      )}
+
+      {/* CTA Lista de espera */}
+      <div style={{background:`linear-gradient(135deg,${T.cyan}12,${T.violet}08)`,
+        borderRadius:16,padding:24,border:`1px solid ${T.cyan}25`,textAlign:"center"}}>
+        <div style={{fontSize:18,marginBottom:8}}>🚀</div>
+        <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:6}}>
+          ¿Listo para lanzar?
+        </div>
+        <div style={{fontSize:12,color:T.textSec,marginBottom:16,lineHeight:1.6}}>
+          Con este análisis puedes crear la landing de lista de espera para tu producto.
+          Captura clientes antes del lanzamiento.
+        </div>
+        <button onClick={()=>alert("Módulo lista de espera — próximamente")}
+          style={{padding:"14px 32px",borderRadius:13,border:"none",
+            background:T.grad,color:"#fff",fontSize:14,fontWeight:700,
+            cursor:"pointer",fontFamily:"inherit",
+            boxShadow:"0 4px 16px rgba(6,182,212,0.35)"}}>
+          Generar lista de espera →
+        </button>
+      </div>
+    </div>
+  );
+
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1392,7 +1783,7 @@ export default function Layer2Mandante({ session, onLogout }) {
     arquitecto:   <Arquitecto onBriefAprobado={b=>{setBriefActivo(b);setPage("ia");}}/>,
     ia:           <IAGeneradora onEncuestaCreada={e=>setEncuestas(p=>[e,...p])} briefArquitecto={briefActivo}/>,
     encuestas:    <MisEncuestas encuestas={encuestas} session={session}/>,
-    respuestas:   <Respuestas stats={stats}/>,
+    respuestas:   <Respuestas stats={stats} encuestas={encuestas}/>,
     encuestadores:<Encuestadores session={session}/>,
     analiticas:   <div style={{padding:24,color:T.textSec,fontSize:14}}>Analíticas — Próximamente</div>,
     settings:     <SettingsPage session={session}/>,
