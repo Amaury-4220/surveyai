@@ -375,8 +375,9 @@ function PantallaEncuesta({encuesta,jornada,ficha,user,online,sessionKey,onCompl
   const nuevaSesion = p._sesionId!==sesionAnterior;
 
   const renderOpciones = () => {
+    try {
     const tipo=p.tipo||"seleccion_unica";
-    const val=resp[p._key];
+    const val=resp[p._key]||"";
 
     if(tipo==="conjoint"&&p.opciones_conjoint?.length>0){
       return(
@@ -440,9 +441,11 @@ function PantallaEncuesta({encuesta,jornada,ficha,user,online,sessionKey,onCompl
 
     // seleccion_unica, seleccion_multiple, iat
     const isMulti=tipo==="seleccion_multiple";
+    const opciones = Array.isArray(p.opciones) ? p.opciones : Object.values(p.opciones||{});
     return(
       <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:20}}>
-        {p.opciones.map((opt,oi)=>{
+        {opciones.map((opt,oi)=>{
+          if(!opt) return null;
           const sel=isMulti?(Array.isArray(val)&&val.includes(opt)):val===opt;
           const hasJump=p.reglas?.salto_logico?.[opt];
           return(
@@ -451,13 +454,33 @@ function PantallaEncuesta({encuesta,jornada,ficha,user,online,sessionKey,onCompl
               <div style={{width:20,height:20,borderRadius:isMulti?5:"50%",flexShrink:0,border:`2px solid ${sel?T.cyan:T.textMuted}`,background:sel?T.cyan:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
                 {sel&&<Check size={11} color="#fff"/>}
               </div>
-              <span style={{fontSize:13,color:T.text,flex:1,lineHeight:1.4}}>{opt}</span>
+              <span style={{fontSize:13,color:T.text,flex:1,lineHeight:1.4}}>{String(opt)}</span>
               {hasJump&&<span style={{fontSize:9,color:T.red,fontWeight:700,background:`${T.red}12`,padding:"2px 7px",borderRadius:20}}>FILTRO</span>}
             </div>
           );
         })}
       </div>
     );
+    } catch(err) {
+      console.error("[SurveyAI] renderOpciones crash:", err, "pregunta:", p);
+      return (
+        <div style={{padding:"14px",borderRadius:12,background:`${T.red}10`,
+          border:`1px solid ${T.red}30`,marginBottom:20}}>
+          <div style={{fontSize:12,color:T.red,fontWeight:700,marginBottom:6}}>
+            Error al mostrar opciones
+          </div>
+          <div style={{fontSize:11,color:T.textSec,marginBottom:12}}>
+            Tipo: {p.tipo} · Opciones: {JSON.stringify(p.opciones)?.slice(0,100)}
+          </div>
+          <button onClick={()=>setPaso(x=>x+1)}
+            style={{padding:"8px 16px",borderRadius:8,border:"none",
+              background:T.grad,color:"#fff",fontSize:12,fontWeight:700,
+              cursor:"pointer",fontFamily:"inherit"}}>
+            Saltar pregunta →
+          </button>
+        </div>
+      );
+    }
   };
 
   return(
@@ -479,7 +502,7 @@ function PantallaEncuesta({encuesta,jornada,ficha,user,online,sessionKey,onCompl
           {p.reglas?.max_opciones&&<span style={{fontSize:9,color:T.yellow,background:`${T.yellow}12`,padding:"2px 7px",borderRadius:20,fontWeight:700}}>MÁX {p.reglas.max_opciones}</span>}
           {(p.tipo==="iat"||p.tiempo_max_ms)&&<span style={{fontSize:9,color:T.cyan,background:`${T.cyan}10`,padding:"2px 7px",borderRadius:20,fontWeight:700,display:"flex",alignItems:"center",gap:3}}><Clock size={8}/>Rápido</span>}
         </div>
-        <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:20,lineHeight:1.55}}>{p.enunciado}</div>
+        <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:20,lineHeight:1.55}}>{p.enunciado||"(Sin enunciado)"}</div>
         {renderOpciones()}
         <div style={{display:"flex",gap:9}}>
           {paso>0&&(
