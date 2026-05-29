@@ -1,5 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  SURVEYAI — CAPA 2: PANEL MANDANTE v5                       ║
+// ║  SURVEYAI — CAPA 2: PANEL MANDANTE v6                       ║
 // ║  Todos los botones funcionales + Cliente + Ver encuesta      ║
 // ╚══════════════════════════════════════════════════════════════╝
 import { useState, useEffect, useRef } from "react";
@@ -679,8 +679,7 @@ function IAGeneradora({ onEncuestaCreada, briefArquitecto }) {
 
     } catch(e) {
       console.error("[SurveyAI] Error publicar:", e);
-      setError(`Error al publicar: ${e.message}`);
-    } finally {
+      setError(`Error al publicar: ${e.message || String(e)}`);
       setPublicando(false);
     }
   };
@@ -795,7 +794,7 @@ Accede aquí: ${result.link}`
             <div>
               <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:3}}>✅ Estudio completo</div>
               <div style={{fontSize:12,color:T.textSec}}>
-                {result.sesiones?.length} sesiones · {result.total_preguntas} preguntas · {fmt(secs)}
+                {result.sesiones?.length||0} sesiones · {result.total_preguntas} preguntas · {fmt(secs)}
                 {result.cliente&&` · ${result.cliente}`}
               </div>
             </div>
