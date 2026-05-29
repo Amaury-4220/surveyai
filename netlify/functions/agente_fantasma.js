@@ -96,167 +96,91 @@ exports.handler = async (event) => {
       }
 
       case "generar_analisis": {
-        const apiKey = process.env.ANTHROPIC_API_KEY;
+        var apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503, { error: "IA no configurada" });
-        const { encuesta_titulo, encuesta_objetivo, total_encuestados, total_descartes, resumen_respuestas } = datos || {};
-        if (!resumen_respuestas) return res(400, { error: "Sin datos de respuestas" });
+        var enc_titulo = (datos && datos.encuesta_titulo) || "";
+        var enc_objetivo = (datos && datos.encuesta_objetivo) || "";
+        var total_enc = (datos && datos.total_encuestados) || 0;
+        var total_desc = (datos && datos.total_descartes) || 0;
+        var resumen_resp = (datos && datos.resumen_respuestas) || null;
+        if (!resumen_resp) return res(400, { error: "Sin datos de respuestas" });
 
-        const completados = total_encuestados - (total_descartes || 0);
-        const tasa = total_encuestados > 0 ? Math.round(completados / total_encuestados * 100) : 0;
+        var completados = total_enc - total_desc;
+        var tasa = total_enc > 0 ? Math.round(completados / total_enc * 100) : 0;
 
-        // Preparar datos para los agentes
-        const resumenTexto = Object.entries(resumen_respuestas).slice(0, 40).map(([pregunta, respuestas]) => {
-          const conteo = {};
-          respuestas.forEach(r => { if(r) conteo[r] = (conteo[r]||0)+1; });
-          const top = Object.entries(conteo)
-            .sort((a,b) => b[1]-a[1]).slice(0, 6)
-            .map(([k,v]) => `    "${k}": ${v} resp (${Math.round(v/respuestas.length*100)}%)`).join("
-");
-          return `P: ${pregunta}
-${top}`;
-        }).join("
+        // Build resumen text
+        var resumenLineas = Object.entries(resumen_resp).slice(0, 30).map(function(entry) {
+          var pregunta = entry[0];
+          var respuestas = entry[1];
+          var conteo = {};
+          respuestas.forEach(function(r) { if(r) conteo[r] = (conteo[r]||0)+1; });
+          var top = Object.entries(conteo)
+            .sort(function(a,b){return b[1]-a[1];}).slice(0,5)
+            .map(function(e2) { return '    "' + e2[0] + '": ' + e2[1] + ' resp (' + Math.round(e2[1]/respuestas.length*100) + '%)'; })
+            .join("\n");
+          return "P: " + pregunta + "\n" + top;
+        });
+        var resumenTexto = resumenLineas.join("\n\n");
+        var contexto = "ESTUDIO: " + enc_titulo + "\nOBJETIVO: " + enc_objetivo + "\nENCUESTADOS: " + total_enc + " | COMPLETADOS: " + completados + " (" + tasa + "%) | DESCARTES: " + total_desc + "\n\nRESULTADOS:\n" + resumenTexto;
 
-");
-
-        const contexto = `ESTUDIO: ${encuesta_titulo}
-OBJETIVO: ${encuesta_objetivo||""}
-ENCUESTADOS: ${total_encuestados} | COMPLETARON: ${completados} (${tasa}%) | DESCARTES: ${total_descartes||0}
-
-RESULTADOS:
-${resumenTexto}`;
-
-        // Sistema multi-agente: 5 análisis especializados
-        const agentes = [
-          {
-            nombre: "IPSOS — Psicología del Consumidor",
-            enfoque: "Analiza los patrones psicológicos, motivaciones implícitas y barreras de adopción del consumidor. Identifica el perfil psicográfico del segmento que respondió positivamente. Detecta los miedos y deseos ocultos detrás de las respuestas."
-          },
-          {
-            nombre: "YouGov — Segmentación y Comportamiento",
-            enfoque: "Segmenta los encuestados por perfil de comportamiento. Identifica cuál es el buyer persona principal y secundario. Analiza los patrones de comportamiento de compra y los factores que aceleran o frenan la decisión."
-          },
-          {
-            nombre: "Gallup — Validación Estadística",
-            enfoque: "Valida estadísticamente los resultados. Calcula el tamaño de mercado estimado, la tasa de adopción probable, y la significancia de los hallazgos. Determina el nivel de confianza en los datos y si la muestra es representativa."
-          },
-          {
-            nombre: "Kantar — Propuesta de Valor y Precio",
-            enfoque: "Analiza el valor percibido del producto/servicio. Determina el precio óptimo psicológico basado en las respuestas de sensibilidad. Identifica los atributos killer features que más valora el mercado y los diferenciadores competitivos."
-          },
-          {
-            nombre: "Dynata — Intención Real y Proyección",
-            enfoque: "Evalúa la intención real de compra vs intención declarada. Proyecta la demanda potencial real aplicando el factor de corrección Juster. Determina qué porcentaje está listo para comprar hoy, en 3 meses, y en 6-12 meses."
-          }
+        // 5 specialized agents
+        var agentesConfig = [
+          { nombre: "IPSOS - Psicologia del Consumidor", enfoque: "Analiza patrones psicologicos, motivaciones implicitas y barreras de adopcion. Detecta miedos y deseos ocultos en las respuestas." },
+          { nombre: "YouGov - Segmentacion y Comportamiento", enfoque: "Segmenta encuestados por perfil. Identifica buyer persona principal y secundario. Analiza factores que aceleran o frenan la decision de compra." },
+          { nombre: "Gallup - Validacion Estadistica", enfoque: "Valida estadisticamente los resultados. Calcula tamano de mercado estimado y tasa de adopcion probable. Determina nivel de confianza en los datos." },
+          { nombre: "Kantar - Propuesta de Valor y Precio", enfoque: "Analiza el valor percibido. Determina precio optimo psicologico. Identifica killer features y diferenciadores competitivos." },
+          { nombre: "Dynata - Intencion Real de Compra", enfoque: "Evalua intencion real vs declarada. Proyecta demanda aplicando factor Juster. Determina que porcentaje compraria hoy, en 3 meses y en 6-12 meses." }
         ];
 
-        const analisisAgentes = [];
-
-        for (const agente of agentes) {
-          const agenteRes = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: {
-              "x-api-key": apiKey,
-              "anthropic-version": "2023-06-01",
-              "content-type": "application/json"
-            },
-            body: JSON.stringify({
-              model: "claude-sonnet-4-20250514",
-              max_tokens: 1200,
-              system: `Eres el agente ${agente.nombre} de SurveyAI, experto en investigación de mercado.
-${agente.enfoque}
-Responde en español. Sé específico y usa datos concretos de las respuestas.
-Devuelve SOLO un objeto JSON con estas claves:
-{
-  "agente": "${agente.nombre}",
-  "hallazgos": ["hallazgo 1 específico", "hallazgo 2", "hallazgo 3"],
-  "insight_clave": "el insight más importante de tu análisis (2-3 oraciones)",
-  "recomendacion": "recomendación accionable basada en tu análisis (2-3 oraciones)"
-}`,
-              messages: [{ role: "user", content: contexto }]
-            })
-          });
-
-          if (agenteRes.ok) {
-            const agenteData = await agenteRes.json();
-            const agenteText = agenteData.content?.[0]?.text || "";
-            const agenteClean = agenteText.replace(/\`\`\`json|\`\`\`/g, "").trim();
-            try {
-              const agenteJson = JSON.parse(agenteClean);
-              analisisAgentes.push(agenteJson);
-            } catch {
-              analisisAgentes.push({
-                agente: agente.nombre,
-                hallazgos: [agenteText.slice(0, 200)],
-                insight_clave: "",
-                recomendacion: ""
-              });
+        var analisisAgentes = [];
+        for (var ai = 0; ai < agentesConfig.length; ai++) {
+          var agente = agentesConfig[ai];
+          var sysPrompt = "Eres el agente " + agente.nombre + " de SurveyAI. " + agente.enfoque + " Responde en espanol. Usa datos concretos. Devuelve SOLO JSON: {\"agente\":\"" + agente.nombre + "\",\"hallazgos\":[\"hallazgo1\",\"hallazgo2\",\"hallazgo3\"],\"insight_clave\":\"texto\",\"recomendacion\":\"texto\"}";
+          try {
+            var aR = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+              body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, system: sysPrompt, messages: [{ role: "user", content: contexto }] })
+            });
+            if (aR.ok) {
+              var aD = await aR.json();
+              var aT = (aD.content && aD.content[0] && aD.content[0].text) || "";
+              var aC = aT.replace(/```json|```/g, "").trim();
+              try { analisisAgentes.push(JSON.parse(aC)); } catch(e) { analisisAgentes.push({ agente: agente.nombre, hallazgos: [aT.slice(0,150)], insight_clave: "", recomendacion: "" }); }
             }
-          }
+          } catch(e2) { log("AGENTE_ERR", ip, { agente: agente.nombre }); }
         }
 
-        // Orquestador: consolida y genera reporte ejecutivo final
-        const resumenAgentes = analisisAgentes.map(a =>
-          `${a.agente}:
-Insight: ${a.insight_clave}
-Recomendación: ${a.recomendacion}`
-        ).join("
+        // Orchestrator consolidates
+        var resumenAgentes = analisisAgentes.map(function(a) {
+          return a.agente + ":\nInsight: " + a.insight_clave + "\nRecomendacion: " + a.recomendacion;
+        }).join("\n\n");
 
-");
+        var orqSystem = "Eres el Orquestador de SurveyAI. Consolida los analisis de los 5 agentes y produce el reporte ejecutivo final. Devuelve SOLO JSON valido sin markdown: {\"total_encuestados\":numero,\"completados\":numero,\"descartes\":numero,\"tasa_completacion\":numero,\"hallazgo_principal\":\"texto\",\"potencial_mercado\":\"texto\",\"precio_optimo\":\"texto\",\"perfil_comprador\":\"texto\",\"intencion_compra\":\"texto\",\"campos_fuertes\":[\"campo1\",\"campo2\",\"campo3\"],\"campos_debiles\":[\"campo1\",\"campo2\"],\"recomendaciones\":[\"rec1\",\"rec2\",\"rec3\",\"rec4\"],\"conclusion\":\"texto\",\"semaforo\":\"VERDE/AMARILLO/ROJO justificacion\"}";
+        var orqMsg = contexto + "\n\nANALISIS DE LOS 5 AGENTES:\n" + resumenAgentes;
 
-        const orqRes = await fetch("https://api.anthropic.com/v1/messages", {
+        var orqRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: {
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 2000,
-            system: `Eres el Orquestador de SurveyAI. Consolida los análisis de los 5 agentes especializados y produce el reporte ejecutivo final de investigación de mercado.
-Devuelve SOLO JSON válido sin markdown:
-{
-  "total_encuestados": número,
-  "completados": número,
-  "descartes": número,
-  "tasa_completacion": número,
-  "hallazgo_principal": "el hallazgo más importante del estudio completo (3-4 oraciones)",
-  "potencial_mercado": "evaluación del potencial de mercado con datos específicos",
-  "precio_optimo": "rango de precio óptimo con justificación",
-  "perfil_comprador": "descripción detallada del buyer persona principal",
-  "intencion_compra": "porcentaje y análisis de intención real de compra",
-  "campos_fuertes": ["fortaleza 1 del producto/servicio", "fortaleza 2", "fortaleza 3"],
-  "campos_debiles": ["debilidad/barrera 1", "debilidad 2"],
-  "recomendaciones": ["recomendación estratégica 1", "recomendación 2", "recomendación 3", "recomendación 4"],
-  "conclusion": "conclusión ejecutiva con veredicto de viabilidad (3-4 oraciones)",
-  "semaforo": "VERDE/AMARILLO/ROJO con justificación"
-}`,
-            messages: [{
-              role: "user",
-              content: `${contexto}
-
-ANÁLISIS DE LOS 5 AGENTES:
-${resumenAgentes}`
-            }]
-          })
+          headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2000, system: orqSystem, messages: [{ role: "user", content: orqMsg }] })
         });
 
         if (!orqRes.ok) return res(502, { error: "Error del orquestador" });
-        const orqData = await orqRes.json();
-        const orqText = orqData.content?.[0]?.text || "";
-        const orqClean = orqText.replace(/\`\`\`json|\`\`\`/g, "").trim();
+        var orqData = await orqRes.json();
+        var orqText = (orqData.content && orqData.content[0] && orqData.content[0].text) || "";
+        var orqClean = orqText.replace(/```json|```/g, "").trim();
 
-        let analisisFinal;
+        var analisisFinal;
         try { analisisFinal = JSON.parse(orqClean); }
-        catch { return res(500, { error: "Error procesando reporte final" }); }
+        catch(e) { return res(500, { error: "Error procesando reporte: " + orqClean.slice(0,100) }); }
 
-        analisisFinal.total_encuestados = total_encuestados;
+        analisisFinal.total_encuestados = total_enc;
         analisisFinal.completados = completados;
-        analisisFinal.descartes = total_descartes || 0;
+        analisisFinal.descartes = total_desc;
         analisisFinal.tasa_completacion = tasa;
         analisisFinal.agentes = analisisAgentes;
 
-        log("ANALISIS_5AGENTES_OK", ip, { encuesta: encuesta_titulo, agentes: analisisAgentes.length });
+        log("ANALISIS_OK", ip, { encuesta: enc_titulo });
         return res(200, { status: "success", analisis: analisisFinal });
       }
 
