@@ -164,6 +164,24 @@ export async function guardarRespuesta(payload) {
           paquete_completo, total_preguntas, total_respondidas } = payload;
 
   // Cabecera de la instancia
+  // Build paquete object (indexed, no dynamic keys)
+  const paqueteObj = {};
+  if (!es_descarte && paquete_completo?.length > 0) {
+    paquete_completo.forEach((item, i) => {
+      paqueteObj[i] = {
+        numero:      item.numero || i + 1,
+        sesion:      item.sesion || 0,
+        pregunta_id: item.pregunta_id || i + 1,
+        enunciado:   (item.enunciado || "").slice(0, 300),
+        tipo:        item.tipo || "",
+        metodologia: item.metodologia || "",
+        respuesta:   Array.isArray(item.respuesta)
+          ? item.respuesta.join(" | ")
+          : String(item.respuesta || ""),
+      };
+    });
+  }
+
   const cabecera = {
     encuesta_id:       encuesta_id || "",
     encuesta_titulo:   payload.encuesta_titulo || "",
@@ -174,29 +192,16 @@ export async function guardarRespuesta(payload) {
     ficha:             payload.ficha || null,
     total_preguntas:   total_preguntas || 0,
     total_respondidas: total_respondidas || 0,
+    paquete_completo:  paqueteObj,
   };
 
   const cabRef = ref(db, "respuestas_cabecera");
   const nuevaCab = await push(cabRef, cabecera);
   const cabecera_id = nuevaCab.key;
 
-  // Guardar paquete completo de respuestas (indexado, sin claves dinámicas)
-  if (!es_descarte && paquete_completo?.length > 0) {
-    const paqueteObj = {};
-    paquete_completo.forEach((item, i) => {
-      paqueteObj[i] = {
-        numero:       item.numero || i + 1,
-        sesion:       item.sesion || 0,
-        pregunta_id:  item.pregunta_id || i + 1,
-        enunciado:    (item.enunciado || "").slice(0, 300),
-        tipo:         item.tipo || "",
-        metodologia:  item.metodologia || "",
-        respuesta:    Array.isArray(item.respuesta)
-          ? item.respuesta.join(" | ")
-          : String(item.respuesta || ""),
-      };
-    });
-    await set(ref(db, `respuestas_detalle/${cabecera_id}`), paqueteObj);
+  // Also save to detalle for backup/future use
+  if (!es_descarte && Object.keys(paqueteObj).length > 0) {
+    try { await set(ref(db, `respuestas_detalle/${cabecera_id}`), paqueteObj); } catch {}
   }
 
   return cabecera_id;
@@ -234,13 +239,13 @@ export function escucharStats(callback) {
 }
 
 export function escucharRespuestas(encuesta_id, callback) {
-  const q = query(ref(db, "respuestas_cabecera"), orderByChild("encuesta_id"), limitToLast(200));
-  onValue(q, snap => {
+  const cabRef = ref(db, "respuestas_cabecera");
+  onValue(cabRef, snap => {
     const data = snap.val() || {};
     const lista = Object.entries(data)
-      .filter(([_, v]) => !encuesta_id || v.encuesta_id === encuesta_id)
       .map(([key, val]) => ({ id: key, ...val }))
-      .sort((a, b) => new Date(b.fecha_captura) - new Date(a.fecha_captura));
+      .filter(v => !encuesta_id || v.encuesta_id === encuesta_id)
+      .sort((a, b) => new Date(b.fecha_captura||0) - new Date(a.fecha_captura||0));
     callback(lista);
   });
   return () => off(q);
