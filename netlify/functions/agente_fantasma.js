@@ -95,6 +95,76 @@ exports.handler = async (event) => {
         });
       }
 
+      case "generar_analisis": {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) return res(503, { error: "IA no configurada" });
+        const { encuesta_titulo, total_encuestados, total_descartes, resumen_respuestas } = datos || {};
+        if (!resumen_respuestas) return res(400, { error: "Sin datos de respuestas" });
+
+        const resumenTexto = Object.entries(resumen_respuestas).slice(0, 30).map(([pregunta, respuestas]) => {
+          const conteo = {};
+          respuestas.forEach(r => { conteo[r] = (conteo[r]||0)+1; });
+          const top = Object.entries(conteo).sort((a,b)=>b[1]-a[1]).slice(0,5)
+            .map(([k,v])=>`  "${k}": ${v} (${Math.round(v/respuestas.length*100)}%)`).join("\n");
+          return `PREGUNTA: ${pregunta}\nRESPUESTAS (${respuestas.length} total):\n${top}`;
+        }).join("\n\n");
+
+        const completados = total_encuestados - (total_descartes||0);
+        const tasa = total_encuestados > 0 ? Math.round(completados/total_encuestados*100) : 0;
+
+        const system = `Eres un experto en investigación de mercado con 20 años de experiencia en análisis de encuestas.
+Analiza los resultados y devuelve SOLO JSON válido sin markdown.
+
+Formato JSON requerido:
+{
+  "total_encuestados": número,
+  "completados": número,
+  "descartes": número,
+  "tasa_completacion": número,
+  "hallazgo_principal": "texto del hallazgo más importante (2-3 oraciones)",
+  "precio_optimo": "análisis del precio óptimo basado en las respuestas",
+  "campos_fuertes": ["campo 1", "campo 2", "campo 3"],
+  "campos_debiles": ["campo 1", "campo 2"],
+  "recomendaciones": ["recomendación 1", "recomendación 2", "recomendación 3"],
+  "conclusion": "conclusión ejecutiva de 2-3 oraciones con potencial de mercado"
+}`;
+
+        const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 2000,
+            system,
+            messages: [{
+              role: "user",
+              content: `Encuesta: ${encuesta_titulo}\nEncuestados: ${total_encuestados}\nCompletados: ${completados}\nDescartes: ${total_descartes||0}\n\nRESULTADOS:\n${resumenTexto}`
+            }]
+          })
+        });
+
+        if (!aiRes.ok) return res(502, { error: "Error de IA" });
+        const aiData = await aiRes.json();
+        const text = aiData.content?.[0]?.text || "";
+        const clean = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
+
+        let analisis;
+        try { analisis = JSON.parse(clean); }
+        catch { return res(500, { error: "Error procesando análisis" }); }
+
+        analisis.total_encuestados = total_encuestados;
+        analisis.completados = completados;
+        analisis.descartes = total_descartes || 0;
+        analisis.tasa_completacion = tasa;
+
+        log("ANALISIS_OK", ip, { encuesta: encuesta_titulo });
+        return res(200, { status: "success", analisis });
+      }
+
       case "generar_brief": {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503, { error: "IA no configurada" });
