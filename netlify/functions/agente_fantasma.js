@@ -98,38 +98,112 @@ exports.handler = async (event) => {
       case "generar_analisis": {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) return res(503, { error: "IA no configurada" });
-        const { encuesta_titulo, total_encuestados, total_descartes, resumen_respuestas } = datos || {};
+        const { encuesta_titulo, encuesta_objetivo, total_encuestados, total_descartes, resumen_respuestas } = datos || {};
         if (!resumen_respuestas) return res(400, { error: "Sin datos de respuestas" });
 
-        const resumenTexto = Object.entries(resumen_respuestas).slice(0, 30).map(([pregunta, respuestas]) => {
+        const completados = total_encuestados - (total_descartes || 0);
+        const tasa = total_encuestados > 0 ? Math.round(completados / total_encuestados * 100) : 0;
+
+        // Preparar datos para los agentes
+        const resumenTexto = Object.entries(resumen_respuestas).slice(0, 40).map(([pregunta, respuestas]) => {
           const conteo = {};
-          respuestas.forEach(r => { conteo[r] = (conteo[r]||0)+1; });
-          const top = Object.entries(conteo).sort((a,b)=>b[1]-a[1]).slice(0,5)
-            .map(([k,v])=>`  "${k}": ${v} (${Math.round(v/respuestas.length*100)}%)`).join("\n");
-          return `PREGUNTA: ${pregunta}\nRESPUESTAS (${respuestas.length} total):\n${top}`;
-        }).join("\n\n");
+          respuestas.forEach(r => { if(r) conteo[r] = (conteo[r]||0)+1; });
+          const top = Object.entries(conteo)
+            .sort((a,b) => b[1]-a[1]).slice(0, 6)
+            .map(([k,v]) => `    "${k}": ${v} resp (${Math.round(v/respuestas.length*100)}%)`).join("
+");
+          return `P: ${pregunta}
+${top}`;
+        }).join("
 
-        const completados = total_encuestados - (total_descartes||0);
-        const tasa = total_encuestados > 0 ? Math.round(completados/total_encuestados*100) : 0;
+");
 
-        const system = `Eres un experto en investigación de mercado con 20 años de experiencia en análisis de encuestas.
-Analiza los resultados y devuelve SOLO JSON válido sin markdown.
+        const contexto = `ESTUDIO: ${encuesta_titulo}
+OBJETIVO: ${encuesta_objetivo||""}
+ENCUESTADOS: ${total_encuestados} | COMPLETARON: ${completados} (${tasa}%) | DESCARTES: ${total_descartes||0}
 
-Formato JSON requerido:
+RESULTADOS:
+${resumenTexto}`;
+
+        // Sistema multi-agente: 5 análisis especializados
+        const agentes = [
+          {
+            nombre: "IPSOS — Psicología del Consumidor",
+            enfoque: "Analiza los patrones psicológicos, motivaciones implícitas y barreras de adopción del consumidor. Identifica el perfil psicográfico del segmento que respondió positivamente. Detecta los miedos y deseos ocultos detrás de las respuestas."
+          },
+          {
+            nombre: "YouGov — Segmentación y Comportamiento",
+            enfoque: "Segmenta los encuestados por perfil de comportamiento. Identifica cuál es el buyer persona principal y secundario. Analiza los patrones de comportamiento de compra y los factores que aceleran o frenan la decisión."
+          },
+          {
+            nombre: "Gallup — Validación Estadística",
+            enfoque: "Valida estadísticamente los resultados. Calcula el tamaño de mercado estimado, la tasa de adopción probable, y la significancia de los hallazgos. Determina el nivel de confianza en los datos y si la muestra es representativa."
+          },
+          {
+            nombre: "Kantar — Propuesta de Valor y Precio",
+            enfoque: "Analiza el valor percibido del producto/servicio. Determina el precio óptimo psicológico basado en las respuestas de sensibilidad. Identifica los atributos killer features que más valora el mercado y los diferenciadores competitivos."
+          },
+          {
+            nombre: "Dynata — Intención Real y Proyección",
+            enfoque: "Evalúa la intención real de compra vs intención declarada. Proyecta la demanda potencial real aplicando el factor de corrección Juster. Determina qué porcentaje está listo para comprar hoy, en 3 meses, y en 6-12 meses."
+          }
+        ];
+
+        const analisisAgentes = [];
+
+        for (const agente of agentes) {
+          const agenteRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              model: "claude-sonnet-4-20250514",
+              max_tokens: 1200,
+              system: `Eres el agente ${agente.nombre} de SurveyAI, experto en investigación de mercado.
+${agente.enfoque}
+Responde en español. Sé específico y usa datos concretos de las respuestas.
+Devuelve SOLO un objeto JSON con estas claves:
 {
-  "total_encuestados": número,
-  "completados": número,
-  "descartes": número,
-  "tasa_completacion": número,
-  "hallazgo_principal": "texto del hallazgo más importante (2-3 oraciones)",
-  "precio_optimo": "análisis del precio óptimo basado en las respuestas",
-  "campos_fuertes": ["campo 1", "campo 2", "campo 3"],
-  "campos_debiles": ["campo 1", "campo 2"],
-  "recomendaciones": ["recomendación 1", "recomendación 2", "recomendación 3"],
-  "conclusion": "conclusión ejecutiva de 2-3 oraciones con potencial de mercado"
-}`;
+  "agente": "${agente.nombre}",
+  "hallazgos": ["hallazgo 1 específico", "hallazgo 2", "hallazgo 3"],
+  "insight_clave": "el insight más importante de tu análisis (2-3 oraciones)",
+  "recomendacion": "recomendación accionable basada en tu análisis (2-3 oraciones)"
+}`,
+              messages: [{ role: "user", content: contexto }]
+            })
+          });
 
-        const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+          if (agenteRes.ok) {
+            const agenteData = await agenteRes.json();
+            const agenteText = agenteData.content?.[0]?.text || "";
+            const agenteClean = agenteText.replace(/\`\`\`json|\`\`\`/g, "").trim();
+            try {
+              const agenteJson = JSON.parse(agenteClean);
+              analisisAgentes.push(agenteJson);
+            } catch {
+              analisisAgentes.push({
+                agente: agente.nombre,
+                hallazgos: [agenteText.slice(0, 200)],
+                insight_clave: "",
+                recomendacion: ""
+              });
+            }
+          }
+        }
+
+        // Orquestador: consolida y genera reporte ejecutivo final
+        const resumenAgentes = analisisAgentes.map(a =>
+          `${a.agente}:
+Insight: ${a.insight_clave}
+Recomendación: ${a.recomendacion}`
+        ).join("
+
+");
+
+        const orqRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
             "x-api-key": apiKey,
@@ -139,30 +213,51 @@ Formato JSON requerido:
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
             max_tokens: 2000,
-            system,
+            system: `Eres el Orquestador de SurveyAI. Consolida los análisis de los 5 agentes especializados y produce el reporte ejecutivo final de investigación de mercado.
+Devuelve SOLO JSON válido sin markdown:
+{
+  "total_encuestados": número,
+  "completados": número,
+  "descartes": número,
+  "tasa_completacion": número,
+  "hallazgo_principal": "el hallazgo más importante del estudio completo (3-4 oraciones)",
+  "potencial_mercado": "evaluación del potencial de mercado con datos específicos",
+  "precio_optimo": "rango de precio óptimo con justificación",
+  "perfil_comprador": "descripción detallada del buyer persona principal",
+  "intencion_compra": "porcentaje y análisis de intención real de compra",
+  "campos_fuertes": ["fortaleza 1 del producto/servicio", "fortaleza 2", "fortaleza 3"],
+  "campos_debiles": ["debilidad/barrera 1", "debilidad 2"],
+  "recomendaciones": ["recomendación estratégica 1", "recomendación 2", "recomendación 3", "recomendación 4"],
+  "conclusion": "conclusión ejecutiva con veredicto de viabilidad (3-4 oraciones)",
+  "semaforo": "VERDE/AMARILLO/ROJO con justificación"
+}`,
             messages: [{
               role: "user",
-              content: `Encuesta: ${encuesta_titulo}\nEncuestados: ${total_encuestados}\nCompletados: ${completados}\nDescartes: ${total_descartes||0}\n\nRESULTADOS:\n${resumenTexto}`
+              content: `${contexto}
+
+ANÁLISIS DE LOS 5 AGENTES:
+${resumenAgentes}`
             }]
           })
         });
 
-        if (!aiRes.ok) return res(502, { error: "Error de IA" });
-        const aiData = await aiRes.json();
-        const text = aiData.content?.[0]?.text || "";
-        const clean = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
+        if (!orqRes.ok) return res(502, { error: "Error del orquestador" });
+        const orqData = await orqRes.json();
+        const orqText = orqData.content?.[0]?.text || "";
+        const orqClean = orqText.replace(/\`\`\`json|\`\`\`/g, "").trim();
 
-        let analisis;
-        try { analisis = JSON.parse(clean); }
-        catch { return res(500, { error: "Error procesando análisis" }); }
+        let analisisFinal;
+        try { analisisFinal = JSON.parse(orqClean); }
+        catch { return res(500, { error: "Error procesando reporte final" }); }
 
-        analisis.total_encuestados = total_encuestados;
-        analisis.completados = completados;
-        analisis.descartes = total_descartes || 0;
-        analisis.tasa_completacion = tasa;
+        analisisFinal.total_encuestados = total_encuestados;
+        analisisFinal.completados = completados;
+        analisisFinal.descartes = total_descartes || 0;
+        analisisFinal.tasa_completacion = tasa;
+        analisisFinal.agentes = analisisAgentes;
 
-        log("ANALISIS_OK", ip, { encuesta: encuesta_titulo });
-        return res(200, { status: "success", analisis });
+        log("ANALISIS_5AGENTES_OK", ip, { encuesta: encuesta_titulo, agentes: analisisAgentes.length });
+        return res(200, { status: "success", analisis: analisisFinal });
       }
 
       case "generar_brief": {
