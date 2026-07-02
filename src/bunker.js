@@ -48,7 +48,7 @@ export async function bunkerCall(accion, datos = {}) {
       "Content-Type": "application/json",
       "X-Device-FP": fp,
     },
-    body: JSON.stringify({ accion, token, datos }),
+    body: JSON.stringify({ caso: accion, token, datos }), // agente_fantasma espera "caso"
   });
 
   if (res.status === 401) {
