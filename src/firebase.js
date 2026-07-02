@@ -248,7 +248,7 @@ export function escucharRespuestas(encuesta_id, callback) {
       .sort((a, b) => new Date(b.fecha_captura||0) - new Date(a.fecha_captura||0));
     callback(lista);
   });
-  return () => off(q);
+  return () => off(cabRef);
 }
 
 export { db, ref, onValue };
